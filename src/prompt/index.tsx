@@ -70,19 +70,23 @@ export function Prompt(props: PromptProps) {
   const completionKey = () => `${text()}:${prefix().length}`
   const options = createMemo<SlashItem[]>(() => {
     if (!props.focused || dismissed() === completionKey()) return []
-    const query = slash()?.query.toLowerCase()
-    return query === undefined ? [] : props.slashItems.filter((item) => item.name.toLowerCase().startsWith(query)).slice(0, 8)
+    const trigger = slash()
+    if (!trigger) return []
+    // Past the start of the prompt only skills can be mentioned; commands there would be plain text.
+    const items = trigger.index === 0 ? props.slashItems : props.slashItems.filter((item) => item.mention)
+    return items.filter((item) => item.name.toLowerCase().startsWith(trigger.query.toLowerCase())).slice(0, 8)
   })
   createEffect(on(() => `${completionKey()}:${props.cwd}`, () => setSelected(0)))
   createEffect(() => {
     if (selected() >= options().length) setSelected(0)
   })
 
-  // Replaces only the "/query" token, so commands and skills work mid-sentence; local actions just drop their token.
+  // Replaces only the "/query" token: a command at the start, a skill mention anywhere.
   function pick(item: SlashItem | undefined) {
     const trigger = slash()
     if (!item || !trigger || !props.focused || !input) return
-    const before = prefix().slice(0, trigger.index) + (item.run ? "" : `/${item.name} `)
+    const insert = item.run ? "" : trigger.index > 0 && item.mention ? `${item.mention} ` : `/${item.name} `
+    const before = prefix().slice(0, trigger.index) + insert
     input.setText(before + input.plainText.slice(prefix().length))
     input.cursorOffset = offsetWidth(before)
     sync()
@@ -183,9 +187,9 @@ export function Prompt(props: PromptProps) {
             {(item, index) => {
               const active = () => index() === selected()
               return (
-                <box flexDirection="row" paddingLeft={2} paddingRight={2} backgroundColor={active() ? theme.primary : theme.backgroundPanel} onMouseUp={() => pick(item)}>
+                <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2} backgroundColor={active() ? theme.primary : theme.backgroundPanel} onMouseUp={() => pick(item)}>
                   <text width={24} flexShrink={0} fg={active() ? theme.selectedListItemText : theme.text} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
-                    /{item.name}
+                    {(slash()?.index ?? 0) > 0 && item.mention ? item.mention : `/${item.name}`}
                   </text>
                   <text fg={active() ? theme.selectedListItemText : theme.textMuted} wrapMode="none" overflow="hidden">{truncate(item.description ?? "", 70)}</text>
                 </box>

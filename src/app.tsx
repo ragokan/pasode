@@ -580,7 +580,7 @@ export function App(props: { initialAgentId?: string }) {
       const [model, dir] = [findModel(draft().provider, draft().model)?.id, cwd()]
       const request = agentId() === key ? api.agents.ref(key).commands() : daemon.listCommands({ agentId: "", draftConfig: { provider: draft().provider, cwd: dir, model } })
       return request
-        .then(({ commands }) => commands.map((command) => ({ name: command.name.replace(/^\//, ""), description: command.description })))
+        .then(({ commands }) => commands.map((command) => ({ name: command.name.replace(/^\//, ""), description: command.description, kind: command.kind })))
         .catch(() => [])
     },
   )
@@ -589,7 +589,11 @@ export function App(props: { initialAgentId?: string }) {
       .filter((command) => command.slash && isEnabled(command))
       .map((command) => ({ name: command.slash!, description: command.title, run: () => command.run() }))
     // Ours win on name clashes (e.g. /compact), so each name is listed once.
-    const remote = (agentCommands.latest ?? []).filter((command) => !local.some((item) => item.name === command.name))
+    // Codex mentions skills as $name (its explicit-invocation syntax); Claude Code loads /name anywhere.
+    const sigil = (current()?.provider ?? draft().provider) === "codex" ? "$" : "/"
+    const remote = (agentCommands.latest ?? [])
+      .filter((command) => !local.some((item) => item.name === command.name))
+      .map((command) => ({ name: command.name, description: command.description, mention: command.kind === "skill" ? sigil + command.name : undefined }))
     return [...local, ...remote]
   })
 

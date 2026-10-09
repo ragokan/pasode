@@ -73,30 +73,37 @@ test("prompt renders its footer and owns autocomplete before host shortcuts", as
   expect(prompt).toBeUndefined()
 })
 
-test("slash completion works mid-text: skills replace just their token, local commands drop theirs", async () => {
+test("mid-text / offers only skills and inserts their mention; the start keeps every command", async () => {
   let prompt: PromptRef | undefined
   let themes = 0
   const screen = await testRender(() => <Prompt {...display} focused cwd={process.cwd()}
-    slashItems={[{ name: "themes", description: "Switch theme", run: () => themes++ }, { name: "check", description: "Review skill" }]}
+    slashItems={[{ name: "themes", description: "Switch theme", run: () => themes++ }, { name: "compact", description: "Compact" }, { name: "check", description: "Review skill", mention: "$check" }]}
     ref={(api) => prompt = api} onSubmit={() => {}} />, { width: 80, height: 24, kittyKeyboard: true })
   try {
-    await screen.mockInput.typeText("please use /ch")
+    await screen.mockInput.typeText("please use /")
     await screen.flush()
-    expect(screen.captureCharFrame()).toContain("/check")
+    let frame = screen.captureCharFrame()
+    expect(frame).toContain("$check")
+    expect(frame).not.toContain("/themes")
+    expect(frame).not.toContain("/compact")
     screen.mockInput.pressTab()
     await screen.flush()
-    expect(prompt?.text()).toBe("please use /check ")
+    expect(prompt?.text()).toBe("please use $check ")
     await screen.mockInput.typeText("on this")
-    expect(prompt?.text()).toBe("please use /check on this")
+    expect(prompt?.text()).toBe("please use $check on this")
 
-    prompt?.setText("fix it /th")
+    prompt?.setText("/")
+    await screen.flush()
+    frame = screen.captureCharFrame()
+    for (const name of ["/themes", "/compact", "/check"]) expect(frame).toContain(name)
+    prompt?.setText("/th")
     await screen.flush()
     screen.mockInput.pressEnter()
     await screen.flush()
     expect(themes).toBe(1)
-    expect(prompt?.text()).toBe("fix it ")
+    expect(prompt?.isEmpty()).toBe(true)
 
-    prompt?.setText("see src/th")
+    prompt?.setText("fix it /th")
     await screen.flush()
     expect(screen.captureCharFrame()).not.toContain("/themes")
   } finally {

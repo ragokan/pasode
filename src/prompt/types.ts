@@ -6,7 +6,13 @@ export type PromptSubmit = {
   images: { data: string; mimeType: string }[]
 }
 
-export type SlashItem = { name: string; description?: string; run?: () => void }
+export type SlashItem = {
+  name: string
+  description?: string
+  run?: () => void
+  /** Skills only: how to mention it mid-sentence ("/name" for Claude, "$name" for Codex). Commands only work at the start. */
+  mention?: string
+}
 
 export type PromptRef = {
   text(): string
