@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { applyTimelineItem, collapseForkContext, dayCategory, dropStaleCompactions, errorText, toolSummary, type AgentTimelineItem } from "./timeline"
+import { applyTimelineItem, collapseForkContext, dayCategory, dropStaleCompactions, errorText, imageFile, toolSummary, type AgentTimelineItem } from "./timeline"
 
 test("joins streamed assistant and reasoning deltas", () => {
   const rows: AgentTimelineItem[] = []
@@ -65,4 +65,13 @@ test("a tool's final unknown detail keeps the richer live detail", () => {
   applyTimelineItem(rows, task)
   applyTimelineItem(rows, { ...task, name: "Agent", status: "completed", detail: { type: "unknown", input: {}, output: null } } satisfies AgentTimelineItem)
   expect(rows[0]).toMatchObject({ status: "completed", detail: { type: "sub_agent", description: "Reply" } })
+})
+
+test("Paseo's tool-image messages stay separate rows and resolve to a local file", () => {
+  const rows: AgentTimelineItem[] = []
+  applyTimelineItem(rows, { type: "assistant_message", text: "![Image](file:///var/folders/x/paseo-attachments-1/a%20b.png)" })
+  applyTimelineItem(rows, { type: "assistant_message", text: "Red", messageId: "msg_1" })
+  expect(rows.map((row) => row.type === "assistant_message" && row.text)).toEqual(["![Image](file:///var/folders/x/paseo-attachments-1/a%20b.png)", "Red"])
+  expect(imageFile((rows[0] as { text: string }).text)).toBe("/var/folders/x/paseo-attachments-1/a b.png")
+  expect(imageFile("see ![Image](file:///x.png)")).toBeUndefined()
 })

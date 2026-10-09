@@ -26,10 +26,10 @@ Same shape as OpenCode's `cli.json` where it overlaps:
 
 ```jsonc
 {
-  "theme": { "name": "monokai-pro-ristretto", "mode": "dark" }, // OpenCode built-ins + ~/.config/{opencode,pascode}/themes
+  "theme": { "name": "monokai-pro-ristretto", "mode": "dark" }, // OpenCode's default + ~/.config/{opencode,pascode}/themes
   "leader": "ctrl+x",
   "keybinds": { "agent.cycle": "shift+tab", "session.sidebar.toggle": "ctrl+b" }, // ids: ctrl+x h; "none" disables
-  "session": { "sidebar": "auto", "sidebarWidth": 42, "thinking": "show", "diffs": "auto" },
+  "session": { "sidebar": "auto", "sidebarWidth": 30, "thinking": "show", "verbosity": "medium", "permissions": "bypass" },
   "plugins": ["~/coding/pascode/plugins/pascode"] // or ["path", { options }]
 }
 ```
@@ -41,32 +41,38 @@ Runtime choices (theme, toggles, last model) persist in `~/.local/state/pascode/
 - **Sessions**: list grouped Running / Today / date (`ctrl+d` twice archives, `ctrl+r` renames), new, worktree
   (`/worktree`), rename, `/compact`, undo (`ctrl+x u`, rewinds conversation and — on Claude — file edits; the
   message returns to the prompt), redo (resends: Paseo can't restore the old reply), fork (new session seeded with a
-  chat-history summary), `/share` (copies a `paseo://` deep link), `/export` (markdown), `/copy`, subagents
-  (`ctrl+x down`: Paseo child agents, or provider subagents read-only; `ctrl+x up` back), reload, archive, older
-  history (pageup at the top, `/older`).
+  chat-history summary), `/share` (copies a `paseo://` deep link), `/export` (markdown), `/copy`, reload, archive,
+  older history (pageup at the top, `/older`). New sessions start as **Build** with permissions bypassed (Claude
+  Bypass / Codex Full Access; `"permissions": "prompt"` keeps the provider default); `shift+tab` switches to Plan.
+- **Composer** (`↓` on a one-line prompt, like OpenCode): Subagents tab (Paseo child agents and provider subagents,
+  read-only; `ctrl+a` running/finished, `ctrl+d` interrupt) and Shell tab (Paseo terminals in the session directory:
+  live output, `ctrl+d` kill). The prompt footer shows `↓ N subagents · N shells` and context usage.
 - **Navigation**: jump to message (`ctrl+x g`), previous/next message (`ctrl+x [` / `]`), first/last, page up/down.
-- **Prompt**: `/` commands (ours plus the session's own commands and skills), `@` file mentions, ↑/↓ history,
-  `!` shell mode (runs locally; output goes with your next message), image paste, `$EDITOR` (`ctrl+x e`),
-  mid-turn messages steer the turn.
-- **Agent**: model, thinking effort (`ctrl+t`), fast mode, mode (`shift+tab`/`tab`), MCP servers (`ctrl+x s`).
-- **Rendering**: OpenCode's tool blocks, colored unified/split diffs, highlighted writes, collapsible thinking,
-  timestamps, permission / plan / question prompts (with free-text "Other…").
+- **Prompt**: only what Paseo takes: the typed text, sent as-is, plus native image attachments (`ctrl+v` or a pasted
+  image path; thumbnails above the input, click or backspace-on-empty removes). `/` commands (ours plus the session's
+  own commands and skills), `$EDITOR` (`ctrl+x e`), mid-turn messages steer the turn.
+- **Agent**: model (`ctrl+x m`), variant cycle (`ctrl+t`, also `cmd+t` where the terminal passes it; `/variants`
+  lists them), fast mode, Paseo mode (`/mode`), MCP servers (`/mcps`, live Claude health).
+- **Rendering**: OpenCode 2.0.26's transcript: collapsed activity groups by `verbosity`, reasoning, tool blocks,
+  colored unified/split diffs, image thumbnails (sent images and images tools return), `Build · model · time · tok/s`
+  turn footers, timestamps, permission / plan / question prompts (with free-text "Other…").
 - **View/System**: theme switcher with live preview (`ctrl+x t`), sidebar (`ctrl+b`), help with every keybind id
   (`ctrl+x h`), `/status` (daemon, providers, plugins).
 
-Not possible through Paseo (no API): LSP/diagnostics, live MCP connection health, true redo (old replies can't be
-restored), published share pages.
+Not possible through Paseo (no API): LSP/diagnostics, Codex MCP health, true redo (old replies can't be restored),
+published share pages, `@` file mentions and `!` shell mode (left out: they'd add to what Paseo sends).
 
 ## MCP
 
-Paseo has no MCP API, so `/mcp` edits each provider's own config, the same places their CLIs use:
+Paseo has no MCP API, so `/mcps` edits each provider's own config, the same places their CLIs use:
 
 - Claude: `projects[<session cwd>].disabledMcpServers` in the `.claude.json` of the `CLAUDE_CONFIG_DIR`
   Paseo launches Claude with (yours: `~/.paseo/claude`). Lists user, local and `.mcp.json` servers. Per project.
 - Codex: `enabled` under `[mcp_servers.<name>]` in `~/.codex/config.toml` (or Paseo's `CODEX_HOME`). Global.
 
 Closing the list reloads the session (Paseo `refreshAgent`, history kept) so the change applies; mid-turn it waits
-for `/reload`. Status shown is the configured state, not live connection health.
+for `/reload`. Claude servers show live health from `claude mcp list` (run with Paseo's `CLAUDE_CONFIG_DIR`);
+Codex servers show their configured state.
 
 ## Plugins
 

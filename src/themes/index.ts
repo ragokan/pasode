@@ -1,9 +1,11 @@
-// Built-in assets and legacy resolution adapted from OpenCode (MIT), packages/tui/src/theme.
+// Ported from OpenCode v2.0.26 (MIT), packages/tui/src/theme and packages/theme/src/tui.
 import { RGBA } from "@opentui/core"
 import { readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ThemeColors } from "../theme"
+import { tint } from "./color"
+import { migrateV1 } from "./v1-migrate"
 
 type Mode = "dark" | "light"
 type ThemeSource = "builtin" | "opencode" | "pascode"
@@ -13,6 +15,7 @@ async function discoverThemes(): Promise<ThemeEntry[]> {
   const themes = new Map<string, ThemeEntry>()
   const directories: [ThemeSource, string][] = [
     ["builtin", join(import.meta.dir, "assets")],
+    ["builtin", join(import.meta.dir, "assets/v2")],
     ["opencode", join(homedir(), ".config/opencode/themes")],
     ["pascode", join(homedir(), ".config/pascode/themes")],
   ]
@@ -56,6 +59,7 @@ const tokenPaths = {
   primary: "hue.interactive.200",
   secondary: "hue.purple.200",
   accent: "hue.accent.200",
+  agent: "categorical.0",
   error: "text.feedback.error.base",
   warning: "text.feedback.warning.base",
   success: "text.feedback.success.base",
@@ -63,11 +67,25 @@ const tokenPaths = {
   text: "text.base",
   textMuted: "text.muted",
   selectedListItemText: "text.action.primary.$focused",
+  actionText: "text.action.primary.base",
+  actionTextSelected: "text.action.primary.$selected",
+  promptPasteText: "text.action.primary.$focused",
+  promptPasteBackground: "text.feedback.warning.base",
+  logoShadow: "",
+  logoShadowMuted: "",
   background: "background.base",
+  backgroundHover: "",
   backgroundPanel: "background.raised.base",
+  backgroundPanelHover: "",
   backgroundElement: "background.raised.high",
-  // shortcut: flat ThemeColors keeps only the dialog background, expand when contextual state colors are exposed.
   backgroundMenu: "@dialog.background.base",
+  backgroundAction: "background.action.primary.base",
+  backgroundActionHovered: "background.action.primary.$hovered",
+  backgroundActionFocused: "background.action.primary.$focused",
+  backgroundActionSelected: "background.action.primary.$selected",
+  backgroundMenuActionHovered: "@dialog.background.action.primary.$hovered",
+  backgroundMenuActionFocused: "@dialog.background.action.primary.$focused",
+  backgroundMenuActionSelected: "@dialog.background.action.primary.$selected",
   border: "border.base",
   borderActive: "scrollbar.base",
   borderSubtle: "background.raised.base",
@@ -110,24 +128,35 @@ const tokenPaths = {
 
 export function resolveThemeJson(json: unknown, mode: Mode): ThemeColors {
   if (!isRecord(json)) throw new Error("Theme must be a JSON object")
+  if (!isRecord(json.theme)) return resolvePalette(json, mode)
+  const selected = json.theme.selectedListItemText !== undefined
+  return resolvePalette(migrateV1({
+    light: { ...resolvePalette(json, "light"), _hasSelectedListItemText: selected },
+    dark: { ...resolvePalette(json, "dark"), _hasSelectedListItemText: selected },
+  }), mode)
+}
+
+function resolvePalette(json: Record<string, unknown>, mode: Mode): ThemeColors {
   const legacy = isRecord(json.theme)
   if (!legacy && !isRecord(json.base)) throw new Error("Theme requires a theme or base object")
   const activeMode = !legacy && json[mode] === undefined ? (mode === "dark" ? "light" : "dark") : mode
   const variant = json[activeMode]
   if (!legacy && !isRecord(variant)) throw new Error("Theme requires a dark or light mode object")
-  const tokens = legacy ? json.theme as Record<string, unknown> : merge(json.base as Record<string, unknown>, variant as Record<string, unknown>)
+  const tokens = legacy ? json.theme as Record<string, unknown> : expandTokens(merge(json.base as Record<string, unknown>, variant as Record<string, unknown>))
   const defs = isRecord(json.defs) ? json.defs : {}
+  const dialog = isRecord(tokens["@dialog"]) ? contextualize(tokens, expandTokens(tokens["@dialog"])) : tokens
 
-  function reference(path: string, chain: string[] = []): unknown {
+  function reference(path: string, chain: string[] = [], source = tokens): unknown {
+    if (path.startsWith("@dialog.")) return reference(path.slice(8), chain, dialog)
     if (chain.includes(path)) throw new Error(`Circular color reference: ${[...chain, path].join(" -> ")}`)
-    let value: unknown = tokens
+    let value: unknown = source
     for (const segment of path.split(".")) {
       while (typeof value === "string" && value.startsWith("$")) {
-        value = reference(value.slice(1), [...chain, path])
+        value = reference(value.slice(1), [...chain, path], source)
       }
       value = isRecord(value) && Object.hasOwn(value, segment) ? value[segment] : undefined
     }
-    if (typeof value === "string" && value.startsWith("$")) return reference(value.slice(1), [...chain, path])
+    if (typeof value === "string" && value.startsWith("$")) return reference(value.slice(1), [...chain, path], source)
     if (value === undefined && chain.length) throw new Error(`Color reference not found: $${path}`)
     return value
   }
@@ -152,10 +181,85 @@ export function resolveThemeJson(json: unknown, mode: Mode): ThemeColors {
 
   const resolved: Partial<ThemeColors> = {}
   for (const key of Object.keys(tokenPaths) as (keyof ThemeColors)[]) {
+    if (!legacy && (key === "agent" || !tokenPaths[key])) continue
     const value = legacy ? tokens[key] : reference(tokenPaths[key])
     if (value !== undefined) resolved[key] = color(value)
   }
+  if (!legacy && tokens.categorical !== undefined) {
+    if (!Array.isArray(tokens.categorical) || !tokens.categorical.length || tokens.categorical.some((name) => typeof name !== "string")) {
+      throw new Error("Theme categorical must be a non-empty array of hue names")
+    }
+    for (const name of tokens.categorical) color(reference(`hue.${name}.200`, ["categorical"]))
+    resolved.agent = color(reference(`hue.${tokens.categorical[0]}.200`, ["categorical"]))
+  }
+  if (!legacy) {
+    // decrease() only shifts hue references, never literal colors that happen to match a swatch.
+    const decrease = (path: string): RGBA | undefined => {
+      let value: unknown = tokens
+      for (const segment of path.split(".")) value = isRecord(value) ? value[segment] : undefined
+      const visited = new Set<string>()
+      while (typeof value === "string" && value.startsWith("$") && !value.startsWith("$hue.")) {
+        if (visited.has(value)) throw new Error(`Circular color reference: ${value}`)
+        visited.add(value)
+        const target = value.slice(1)
+        value = tokens
+        for (const segment of target.split(".")) value = isRecord(value) ? value[segment] : undefined
+      }
+      if (value === undefined) return
+      const match = typeof value === "string" ? /^\$hue\.(.+)\.(100|200|300|400|500|600|700|800|900)$/.exec(value) : null
+      return match ? color(reference(`hue.${match[1]}.${Math.max(100, Number(match[2]) - 100)}`)) : color(value)
+    }
+    const backgroundHover = decrease("background.base")
+    const backgroundPanelHover = decrease("background.raised.base")
+    if (backgroundHover) resolved.backgroundHover = backgroundHover
+    if (backgroundPanelHover) resolved.backgroundPanelHover = backgroundPanelHover
+  }
   return withFallbacks(resolved, activeMode)
+}
+
+const states = ["disabled", "pressed", "focused", "hovered", "selected"] as const
+
+function expandTokens(tokens: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...tokens }
+  for (const kind of ["text", "background"]) {
+    const section = result[kind]
+    if (!isRecord(section)) continue
+    const action = section.action
+    result[kind] = {
+      ...section,
+      ...(kind === "text" && section.muted === undefined && section.base !== undefined ? { muted: "$text.base" } : {}),
+      ...(isRecord(action) ? { action: Object.fromEntries(Object.entries(action).map(([variant, value]) => [
+        variant,
+        isRecord(value) && value.base !== undefined ? {
+          ...value,
+          ...Object.fromEntries(states.map((state) => [`$${state}`, value[`$${state}`] ?? `$${kind}.action.${variant}.base`])),
+        } : value,
+      ])) } : {}),
+    }
+  }
+  return result
+}
+
+function contextualize(base: Record<string, unknown>, override: Record<string, unknown>) {
+  const result = merge(base, override)
+  for (const kind of ["text", "background"]) {
+    const baseSection = base[kind]
+    const surfaceSection = override[kind]
+    const section = result[kind]
+    if (!isRecord(baseSection) || !isRecord(section)) continue
+    const baseActions = baseSection.action
+    const surfaceActions = isRecord(surfaceSection) ? surfaceSection.action : undefined
+    if (!isRecord(baseActions)) continue
+    section.action = Object.fromEntries(Object.entries(baseActions).map(([variant, baseVariant]) => {
+      const surfaceVariant = isRecord(surfaceActions) ? surfaceActions[variant] : undefined
+      if (!isRecord(baseVariant)) return [variant, baseVariant]
+      return [variant, Object.fromEntries(["base", ...states.map((state) => `$${state}`)].map((state) => [
+        state,
+        (isRecord(surfaceVariant) ? surfaceVariant[state] ?? surfaceVariant.base : undefined) ?? baseVariant[state] ?? baseVariant.base,
+      ]))]
+    }))
+  }
+  return result
 }
 
 function withFallbacks(colors: Partial<ThemeColors>, mode: Mode): ThemeColors {
@@ -180,9 +284,17 @@ function withFallbacks(colors: Partial<ThemeColors>, mode: Mode): ThemeColors {
   const diffAddedBg = colors.diffAddedBg ?? mix(background, success, 0.15)
   const diffRemovedBg = colors.diffRemovedBg ?? mix(background, error, 0.15)
   return {
-    primary, secondary, accent, error, warning, success, info, text, textMuted,
+    primary, secondary, accent, agent: secondary, error, warning, success, info, text, textMuted,
     selectedListItemText: background,
+    actionText: text, actionTextSelected: primary,
+    promptPasteText: colors.selectedListItemText ?? background, promptPasteBackground: warning,
+    logoShadow: tint(background, text, 0.25), logoShadowMuted: tint(background, textMuted, 0.25),
     background, backgroundPanel, backgroundElement, backgroundMenu: backgroundElement,
+    backgroundHover: backgroundPanel, backgroundPanelHover: backgroundElement,
+    backgroundAction: RGBA.fromInts(0, 0, 0, 0), backgroundActionHovered: backgroundPanel,
+    backgroundActionFocused: primary, backgroundActionSelected: RGBA.fromInts(0, 0, 0, 0),
+    backgroundMenuActionHovered: backgroundElement, backgroundMenuActionFocused: primary,
+    backgroundMenuActionSelected: RGBA.fromInts(0, 0, 0, 0),
     border, borderActive: primary, borderSubtle: backgroundPanel,
     diffAdded: success, diffRemoved: error, diffContext: textMuted, diffHunkHeader: info,
     diffHighlightAdded: success, diffHighlightRemoved: error,

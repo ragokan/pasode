@@ -33,6 +33,7 @@ export const api = createPaseoApi(daemon)
 
 export async function connect() {
   await daemon.connect()
+  void loadCatalog()
   const list = await api.agents.list({ filter: { includeArchived: false }, page: { limit: 200 }, subscribe: {} })
   setAgents(reconcile(Object.fromEntries(list.entries.map(({ agent }) => [agent.id, agent]))))
   list.subscription.subscribe({
@@ -105,6 +106,23 @@ function itemMark(item: AgentTimelineItem, at: number): Mark {
 
 /** Bumped after MCP toggles so the sidebar rereads provider config. */
 export const [mcpRevision, setMcpRevision] = createSignal(0)
+
+type CatalogModel = NonNullable<Awaited<ReturnType<typeof api.providers.listModels>>["models"]>[number]
+/** Each provider's models (display names like "Opus 5.5", thinking options), fetched on connect. */
+export const [catalog, setCatalog] = createStore<Record<string, CatalogModel[]>>({})
+
+export async function loadCatalog() {
+  const results = await Promise.all(PROVIDERS.map((provider) => api.providers.listModels(provider).catch(() => undefined)))
+  for (const [index, result] of results.entries()) if (result?.models) setCatalog(PROVIDERS[index]!, reconcile(result.models))
+}
+
+export const findModel = (provider: string, id?: string | null) => {
+  const models = catalog[provider] ?? []
+  return models.find((model) => model.id === id) ?? (id ? undefined : models.find((model) => model.isDefault))
+}
+export const modelLabel = (provider: string, id?: string | null) => findModel(provider, id)?.label ?? id ?? "default model"
+/** OpenCode shows the provider's product name; Paseo's Claude provider is Claude Code. */
+export const providerName = (provider: string) => ({ claude: "Claude Code", codex: "Codex" })[provider] ?? provider
 
 /** Claude/Codex plan windows as the daemon reports them (same data as the Paseo app). */
 export const [usage, setUsage] = createSignal<PaseoProviderUsageResult["providers"]>()

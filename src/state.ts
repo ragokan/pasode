@@ -16,6 +16,8 @@ export type Draft = {
   model?: string
   label?: string
   thinking?: string
+  /** Transient: OpenCode's agent for the next session — "plan" starts in plan mode; Build (default) bypasses permissions. */
+  agent?: "plan"
   /** Transient (not remembered): start in a new git worktree, optionally on this branch. */
   worktree?: { branch?: string }
   /** Transient: a fork's chat-history attachment, source title and directory. */
@@ -27,7 +29,10 @@ export const [draft, setDraft] = createSignal<Draft>(kvGet("draft", { provider: 
 export const [subagent, setSubagent] = createSignal<{ parentId: string; id: string; title: string }>()
 
 type Prefs = {
-  thinking: "show" | "hide" | "collapsed"
+  thinking: "show" | "hide"
+  grouping: "auto" | "none"
+  verbosity: "low" | "medium" | "high"
+  tps: boolean
   details: boolean
   timestamps: boolean
   sidebar: "auto" | "show" | "hide"
@@ -38,15 +43,21 @@ type Prefs = {
 }
 const defaults: Prefs = {
   thinking: config.session?.thinking ?? "show",
+  grouping: config.session?.grouping ?? "auto",
+  verbosity: config.session?.verbosity ?? "medium",
+  tps: config.session?.tps ?? true,
   details: config.session?.details ?? false,
   timestamps: config.session?.timestamps ?? false,
   sidebar: config.session?.sidebar ?? "auto",
-  sidebarWidth: config.session?.sidebarWidth ?? 42,
+  sidebarWidth: config.session?.sidebarWidth ?? 30,
   diffs: config.session?.diffs ?? "auto",
   theme: config.theme?.name ?? "monokai-pro-ristretto",
   themeMode: config.theme?.mode ?? "dark",
 }
-export const [prefs, setPrefsStore] = createStore<Prefs>({ ...defaults, ...kvGet<Partial<Prefs>>("prefs", {}) })
+const saved = kvGet<Partial<Prefs> & { thinking?: string }>("prefs", {})
+// The old "collapsed" thinking mode became OpenCode's verbosity grouping.
+if (saved.thinking !== "show" && saved.thinking !== "hide") delete saved.thinking
+export const [prefs, setPrefsStore] = createStore<Prefs>({ ...defaults, ...(saved as Partial<Prefs>) })
 
 export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
   setPrefsStore(key, value as never)
@@ -55,7 +66,7 @@ export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
 
 export function rememberDraft(value: Draft) {
   setDraft(value)
-  const { worktree, fork, ...lasting } = value
+  const { worktree, fork, agent, ...lasting } = value
   kvSet("draft", lasting)
 }
 

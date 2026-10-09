@@ -9,13 +9,20 @@ export type PascodeConfig = {
   keybinds?: Record<string, string>
   /** Plugin paths (absolute, ~, or relative to the config file); `[path, options]` passes options to setup. */
   plugins?: (string | [string, Record<string, unknown>])[]
+  /** OpenCode 2.0.26's `session` options, plus sidebarWidth/details/timestamps/diffs/permissions. */
   session?: {
     sidebar?: "auto" | "show" | "hide"
     sidebarWidth?: number
-    thinking?: "show" | "hide" | "collapsed"
+    thinking?: "show" | "hide"
+    grouping?: "auto" | "none"
+    verbosity?: "low" | "medium" | "high"
+    tps?: boolean
+    markdown?: "source" | "rendered"
     details?: boolean
     timestamps?: boolean
     diffs?: "auto" | "unified" | "split"
+    /** "bypass" (default): new sessions start in Claude's Bypass / Codex's Full Access mode. */
+    permissions?: "bypass" | "prompt"
   }
   attention?: { notifications?: boolean }
 }

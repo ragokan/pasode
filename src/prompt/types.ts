@@ -1,11 +1,9 @@
-import type { PaseoAgentSendOptions } from "@getpaseo/client"
-import type { KeyEvent } from "@opentui/core"
+import type { KeyEvent, RGBA } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 
 export type PromptSubmit = {
   text: string
-  mode: "normal" | "shell"
-  images: NonNullable<PaseoAgentSendOptions["images"]>
+  images: { data: string; mimeType: string }[]
 }
 
 export type SlashItem = { name: string; description?: string; run?: () => void }
@@ -23,10 +21,13 @@ export type PromptRef = {
 
 export type PromptProps = {
   focused: boolean
-  placeholder: string
   cwd: string
   slashItems: SlashItem[]
-  footer: JSX.Element
+  agent: { label: string; color: RGBA }
+  model: { name: string; provider: string; variant?: string }
+  location: string
+  footerRight?: JSX.Element
+  status: { running: boolean; interruptArmed: boolean }
   /** Reject to retain the draft, including images. */
   onSubmit(input: PromptSubmit): void | Promise<void>
   ref?: (api: PromptRef | undefined) => void

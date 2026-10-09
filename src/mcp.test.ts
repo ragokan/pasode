@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { listClaudeMcp, listCodexMcp, setClaudeMcp, setTomlEnabled } from "./mcp"
+import { listClaudeMcp, listCodexMcp, mcpCounts, setClaudeMcp, setTomlEnabled, parseClaudeMcpList } from "./mcp"
 
 test("claude: lists scopes and toggles projects[cwd].disabledMcpServers in place", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
@@ -54,4 +54,27 @@ test("codex: edits only the named table and keeps comments", () => {
   const on = setTomlEnabled(toml, "cua-driver", true)
   expect(on.split("\n").at(-1)).toBe("enabled = true")
   expect(() => setTomlEnabled(toml, "nope", true)).toThrow("No [mcp_servers.nope]")
+})
+
+test("parses `claude mcp list` health lines", () => {
+  const sample = [
+    "Checking MCP server health…",
+    "",
+    "cua: /Users/me/.local/bin/cua-driver mcp --direct - ✔ Connected",
+    "browseros: http://127.0.0.1:9010/mcp (HTTP) - ✔ Connected",
+    "linear: https://mcp.linear.app/sse (SSE) - ⚠ Needs authentication",
+    "broken: npx -y thing - ✗ Failed to connect",
+  ].join("\n")
+  expect(parseClaudeMcpList(sample)).toEqual({ cua: "connected", browseros: "connected", linear: "needs_auth", broken: "failed" })
+  expect(parseClaudeMcpList("No MCP servers configured.")).toEqual({})
+})
+
+test("home footer counts: enabled servers only; unchecked providers count enabled as connected", () => {
+  const servers = [
+    { name: "cua", scope: "user", enabled: true },
+    { name: "browseros", scope: "user", enabled: true },
+    { name: "off", scope: "user", enabled: false },
+  ] as const
+  expect(mcpCounts([...servers], { cua: "connected", browseros: "failed", off: "connected" }, true)).toEqual({ total: 2, connected: 1, failed: 1 })
+  expect(mcpCounts([...servers], {}, false)).toEqual({ total: 2, connected: 2, failed: 0 })
 })

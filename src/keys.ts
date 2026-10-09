@@ -45,9 +45,17 @@ export function matchStroke(stroke: Stroke, key: Pick<KeyEvent, "name" | "ctrl" 
   )
 }
 
+// OpenCode's context/keymap.tsx formatOptions: key-name and modifier display aliases.
+const display: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→", pageup: "pgup", pagedown: "pgdn", delete: "del", meta: "alt" }
+
 export function formatBinding(spec: string | undefined, leader = "ctrl+x") {
   const first = spec?.split(",")[0]?.trim()
-  return !first || first === "none" ? undefined : first.replaceAll("<leader>", `${leader} `)
+  if (!first || first === "none") return undefined
+  return first
+    .replaceAll("<leader>", `${leader} `)
+    .split(" ")
+    .map((stroke) => stroke.split("+").map((part) => display[part] ?? part).join("+"))
+    .join(" ")
 }
 
 /**

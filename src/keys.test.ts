@@ -16,6 +16,9 @@ test("parses OpenCode keybind strings", () => {
   expect(parseBinding("<leader>l", "ctrl+x")).toEqual([[key("x", { ctrl: true }), key("l")]])
   expect(parseBinding("esc esc")).toEqual([[key("escape"), key("escape")]])
   expect(formatBinding("<leader>l,ctrl+k")).toBe("ctrl+x l")
+  expect(formatBinding("down")).toBe("↓")
+  expect(formatBinding("<leader>up")).toBe("ctrl+x ↑")
+  expect(formatBinding("meta+pagedown")).toBe("alt+pgdn")
 })
 
 test("matches sequences with pending prefixes", () => {

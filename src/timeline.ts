@@ -1,4 +1,5 @@
 import type { AgentTimelineItem, ToolCallTimelineItem } from "@getpaseo/protocol/agent-types"
+import { fileURLToPath } from "node:url"
 
 export type { AgentTimelineItem, ToolCallTimelineItem }
 
@@ -30,12 +31,20 @@ export function applyTimelineItem(rows: AgentTimelineItem[], item: AgentTimeline
   if (
     item.type === "assistant_message" &&
     last?.type === "assistant_message" &&
-    (!item.messageId || !last.messageId || item.messageId === last.messageId)
+    (!item.messageId || !last.messageId || item.messageId === last.messageId) &&
+    !imageFile(item.text) &&
+    !imageFile(last.text)
   ) {
     last.text += item.text
     return
   }
   rows.push(item)
+}
+
+/** Paseo reports an image a tool returned (e.g. Read on a PNG) as its own assistant message: `![Image](file:///…)`. */
+export function imageFile(text: string) {
+  const url = text.trim().match(/^!\[[^\]]*\]\((file:\/\/[^)\s]+)\)$/)?.[1]
+  return url ? fileURLToPath(url) : undefined
 }
 
 /** OpenCode-style one-line tool summary: icon plus what the tool touched. */

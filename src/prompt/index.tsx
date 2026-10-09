@@ -1,47 +1,49 @@
 import { decodePasteBytes, TextAttributes, type KeyEvent, type TextareaRenderable } from "@opentui/core"
-import { useKeyboard, usePaste, useRenderer } from "@opentui/solid"
-import { createEffect, createMemo, createResource, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { truncate } from "../dialog"
 import { SplitBorder } from "../session"
 import { theme } from "../theme"
-import { listFiles, mentionQuery, promptOffsetWidth, rankFiles } from "./autocomplete"
 import { readClipboard } from "./clipboard"
 import { editPrompt } from "./editor"
-import { PromptHistory, readHistory, writeHistory } from "./history"
-import { shellTransition } from "./mode"
+import { PromptMetadata, takeWidth } from "./metadata"
+import { PromptSpinner } from "./spinner"
 import type { PromptProps, PromptRef, PromptSubmit, SlashItem } from "./types"
 
 export type { PromptProps, PromptRef, PromptSubmit, SlashItem } from "./types"
 
-let savedHistory: PromptHistory | undefined
+// OpenCode v2.0.26 routes/home.tsx (MIT), selected once per prompt mount.
+const examples = ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"]
+const EmptyBorder = { topLeft: " ", topRight: " ", bottomLeft: " ", bottomRight: " ", horizontal: " ", vertical: " ", topT: " ", bottomT: " ", leftT: " ", rightT: " ", cross: " " }
 
-// OpenCode's prompt layout and interaction patterns (MIT), pared down for Paseo.
+// Layout/metadata/attachment interactions ported from OpenCode v2.0.26
+// packages/tui/src/component/prompt/index.tsx (MIT); Paseo owns submission.
 export function Prompt(props: PromptProps) {
   const renderer = useRenderer()
+  const dimensions = useTerminalDimensions()
+  const example = Math.floor(Math.random() * examples.length)
   let input: TextareaRenderable | undefined
   let disposed = false
   let submitting = false
   let editing = false
   let pasteQueue = Promise.resolve()
   let generation = 0
-  let draftImages: PromptSubmit["images"] = []
   const [text, setTextSignal] = createSignal("")
   const [prefix, setPrefix] = createSignal("")
-  const [mode, setMode] = createSignal<PromptSubmit["mode"]>("normal")
   const [images, setImages] = createSignal<PromptSubmit["images"]>([])
+  // OpenCode v2.0.26 prompt image-preview sizing and three-thumbnail cap (MIT).
+  const imagePreviewHeight = createMemo(() => Math.max(4, Math.min(8, Math.floor(dimensions().height / 4))))
+  const imagePreviewWidth = () => imagePreviewHeight() * 2
+  const visibleImages = createMemo(() => images().slice(0, 3))
+  const placeholder = createMemo(() => {
+    const value = `Ask anything… "${examples[example]}"`
+    const width = dimensions().width < 44 ? dimensions().width - 5 : Math.min(75, dimensions().width - 4) - 5
+    return takeWidth(value, Math.max(1, width)).trimEnd()
+  })
   const [error, setError] = createSignal<string>()
   const [selected, setSelected] = createSignal(0)
   const [dismissed, setDismissed] = createSignal<string>()
   const report = (error: unknown) => { if (!disposed) setError(error instanceof Error ? error.message : String(error)) }
-  let history = new PromptHistory()
-  let historyWritable = true
-  try {
-    history = savedHistory ??= new PromptHistory(readHistory())
-    history.reset()
-  } catch (error) {
-    historyWritable = false
-    report(error)
-  }
 
   function sync() {
     if (!input || disposed) return
@@ -59,27 +61,16 @@ export function Prompt(props: PromptProps) {
   function clear() {
     generation++
     setText("")
-    setMode("normal")
     setImages([])
-    draftImages = []
-    history.reset()
     setError(undefined)
   }
 
-  const mention = createMemo(() => mentionQuery(text(), prefix().length))
   const slashQuery = createMemo(() => prefix() === text() ? text().match(/^\/(\S*)$/)?.[1]?.toLowerCase() : undefined)
-  const completionKey = () => `${mode()}:${text()}:${prefix().length}`
-  const [files] = createResource(
-    () => mode() === "normal" && !!mention() && props.focused ? props.cwd : undefined,
-    (cwd) => listFiles(cwd).catch((error) => { report(error); return [] }),
-  )
+  const completionKey = () => `${text()}:${prefix().length}`
   const options = createMemo<SlashItem[]>(() => {
-    if (!props.focused || mode() === "shell" || dismissed() === completionKey()) return []
+    if (!props.focused || dismissed() === completionKey()) return []
     const query = slashQuery()
-    if (query !== undefined) return props.slashItems.filter((item) => item.name.toLowerCase().startsWith(query)).slice(0, 8)
-    if (files.loading) return []
-    const token = mention()
-    return token ? rankFiles(files() ?? [], token.query).map((name) => ({ name })) : []
+    return query === undefined ? [] : props.slashItems.filter((item) => item.name.toLowerCase().startsWith(query)).slice(0, 8)
   })
   createEffect(on(() => `${completionKey()}:${props.cwd}`, () => setSelected(0)))
   createEffect(() => {
@@ -88,27 +79,17 @@ export function Prompt(props: PromptProps) {
 
   function pick(item: SlashItem | undefined) {
     if (!item || !props.focused) return
-    if (slashQuery() !== undefined) {
-      setText(item.run ? "" : `/${item.name} `)
-      item.run?.()
-      return
-    }
-    const token = mention()
-    if (!token) return
-    const before = `${text().slice(0, token.start)}@${item.name} `
-    setText(before + text().slice(token.end))
-    if (input) input.cursorOffset = promptOffsetWidth(before)
-    sync()
-    input?.focus()
+    setText(item.run ? "" : `/${item.name} `)
+    item.run?.()
   }
 
   function paste(pastedText?: string) {
     const currentGeneration = generation
     pasteQueue = pasteQueue.then(async () => {
-      const content = await readClipboard(pastedText)
+      const content = await readClipboard(pastedText, props.cwd)
       if (disposed || generation !== currentGeneration) return
-      if ("image" in content) setImages((list) => [...list, content.image])
-      else input?.insertText(content.text.replace(/\r\n?/g, "\n"))
+      if ("image" in content) setImages((list) => [...list, { ...content.image }])
+      else if ("text" in content) input?.insertText(content.text.replace(/\r\n?/g, "\n"))
       sync()
     }).catch(report)
   }
@@ -117,7 +98,7 @@ export function Prompt(props: PromptProps) {
     if (!props.focused || disposed || key.defaultPrevented || key.eventType === "release") return false
     const handled = (() => {
       if (key.ctrl && key.name === "v") return paste(), true
-      if (!key.ctrl && !key.meta) {
+      if (!key.ctrl && !key.meta && !key.option) {
         const list = options()
         if (list.length) {
           if (!key.shift && key.name === "up") return setSelected((i) => (i - 1 + list.length) % list.length), true
@@ -125,25 +106,8 @@ export function Prompt(props: PromptProps) {
           if (!key.shift && (key.name === "tab" || key.name === "return")) return pick(list[selected()]), true
           if (key.name === "escape") return setDismissed(completionKey()), true
         }
-        const nextMode = shellTransition(mode(), input?.plainText ?? text(), key.sequence === "!" ? "!" : key.name)
-        if (nextMode) return setMode(nextMode), true
-        if (key.shift) return false
-        if (input && (key.name === "up" || key.name === "down")) {
-          const row = input.scrollY + input.visualCursor.visualRow
-          if (key.name === "up" && row !== 0) return false
-          if (key.name === "down" && row !== Math.max(0, input.editorView.getTotalVirtualLineCount() - 1)) return false
-          const wasBrowsing = history.browsing
-          const entry = history.move(key.name === "up" ? -1 : 1, { text: input.plainText, mode: mode() })
-          if (!entry) return false
-          if (!wasBrowsing) draftImages = images()
-          setImages(history.browsing ? [] : draftImages)
-          setMode(entry.mode)
-          setText(entry.text)
-          // Keep ↑ at the top and ↓ at the bottom of multiline history entries.
-          if (key.name === "up") input.gotoBufferHome()
-          sync()
-          return true
-        }
+        if (!key.shift && key.name === "backspace" && !(input?.plainText ?? text()).length && images().length)
+          return setImages((list) => list.slice(0, -1)), true
       }
       return false
     })()
@@ -165,15 +129,12 @@ export function Prompt(props: PromptProps) {
       if (disposed) return
       const original = input?.plainText ?? text()
       const attached = images()
-      const currentMode = mode()
-      const value: PromptSubmit = { text: original.trim(), mode: currentMode, images: attached }
-      if (!value.text && !value.images.length) return
+      const value: PromptSubmit = { text: original, images: attached }
+      if (!value.text.trim() && !value.images.length) return
       setError(undefined)
       await props.onSubmit(value)
-      history.append({ text: value.text, mode: value.mode })
       // Do not discard edits or new images that arrived while the host was sending.
-      if (!disposed && (input?.plainText ?? text()) === original && images() === attached && mode() === currentMode) clear()
-      if (historyWritable) await writeHistory(history.entries).catch(report)
+      if (!disposed && (input?.plainText ?? text()) === original && images() === attached) clear()
     } catch (error) {
       report(error)
     } finally {
@@ -183,7 +144,7 @@ export function Prompt(props: PromptProps) {
 
   const api: PromptRef = {
     text: () => input?.plainText ?? text(),
-    setText: (value) => { generation++; history.reset(); setText(value) },
+    setText: (value) => { generation++; setText(value) },
     clear,
     focus: () => { if (props.focused && !disposed) input?.focus() },
     isEmpty: () => !(input?.plainText ?? text()).length && !images().length,
@@ -202,10 +163,9 @@ export function Prompt(props: PromptProps) {
   }
   onMount(() => props.ref?.(api))
   onCleanup(() => { disposed = true; props.ref?.(undefined) })
-  const color = () => mode() === "shell" ? theme.warning : theme.primary
 
   return (
-    <box flexShrink={0}>
+    <box flexShrink={0} width="100%">
       <Show when={options().length}>
         <box backgroundColor={theme.backgroundPanel} paddingTop={1} paddingBottom={1} flexShrink={0}>
           <For each={options()}>
@@ -213,8 +173,8 @@ export function Prompt(props: PromptProps) {
               const active = () => index() === selected()
               return (
                 <box flexDirection="row" paddingLeft={2} paddingRight={2} backgroundColor={active() ? theme.primary : theme.backgroundPanel} onMouseUp={() => pick(item)}>
-                  <text width={slashQuery() !== undefined ? 24 : undefined} flexGrow={slashQuery() === undefined ? 1 : 0} flexShrink={0} fg={active() ? theme.selectedListItemText : theme.text} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
-                    {slashQuery() !== undefined ? "/" : "@"}{item.name}
+                  <text width={24} flexShrink={0} fg={active() ? theme.selectedListItemText : theme.text} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
+                    /{item.name}
                   </text>
                   <text fg={active() ? theme.selectedListItemText : theme.textMuted} wrapMode="none" overflow="hidden">{truncate(item.description ?? "", 70)}</text>
                 </box>
@@ -223,41 +183,80 @@ export function Prompt(props: PromptProps) {
           </For>
         </box>
       </Show>
-      <box border={["left"]} borderColor={color()} customBorderChars={SplitBorder} flexShrink={0}>
-        <box paddingLeft={2} paddingRight={2} paddingTop={1} backgroundColor={theme.backgroundElement} gap={1}>
-          <Show when={images().length}>
-            <box flexDirection="row" gap={1} flexWrap="wrap">
-              <For each={images()}>{(_, index) => <text fg={theme.accent}>[Image {index() + 1}]</text>}</For>
+      <box width="100%" border={["left"]} borderColor={props.agent.color} customBorderChars={{ ...SplitBorder, bottomLeft: "╹" }} flexShrink={0}>
+        <box width="100%" flexGrow={1} flexShrink={0} paddingLeft={dimensions().width < 44 ? 1 : 2} paddingRight={dimensions().width < 44 ? 1 : 2} paddingTop={1} backgroundColor={theme.backgroundElement}>
+          <Show when={visibleImages().length}>
+            <box width="100%" height={imagePreviewHeight() + 1} flexDirection="row" flexShrink={0} justifyContent="flex-start" gap={1} paddingBottom={1}>
+              <For each={visibleImages()}>
+                {(image, index) => {
+                  const [failed, setFailed] = createSignal(false)
+                  return (
+                    <box id={`prompt-image-${index()}`} width={imagePreviewWidth()} height={imagePreviewHeight()} flexBasis={imagePreviewWidth()} flexShrink={1}
+                      onMouseUp={(event) => {
+                        if (event.button !== 0 || !props.focused) return
+                        event.stopPropagation()
+                        setImages((list) => list.filter((item) => item !== image))
+                      }}>
+                      <Show when={!failed()} fallback={<box width="100%" height="100%" alignItems="center" justifyContent="center"><text fg={theme.textMuted}>No preview</text></box>}>
+                        <image id={`prompt-image-preview-${index()}`} source={`data:${image.mimeType};base64,${image.data}`} fit="cover" protocol="auto" width="100%" height="100%" onError={() => setFailed(true)} />
+                      </Show>
+                    </box>
+                  )
+                }}
+              </For>
+              <Show when={images().length > visibleImages().length}>
+                <box width={8} height={imagePreviewHeight()} flexBasis={8} flexShrink={1} alignItems="center" justifyContent="center">
+                  <text fg={theme.textMuted} wrapMode="none" truncate>+{images().length - visibleImages().length} more</text>
+                </box>
+              </Show>
             </box>
+            <text fg={theme.textMuted}>click image to remove · backspace when empty</text>
           </Show>
           <textarea
+            width="100%"
             ref={(r: TextareaRenderable) => { input = r; sync() }}
             onContentChange={sync}
             onCursorChange={sync}
             focused={props.focused}
-            placeholder={mode() === "shell" ? "Run a shell command…" : props.placeholder}
+            placeholder={placeholder()}
             placeholderColor={theme.textMuted}
             textColor={theme.text}
             focusedTextColor={theme.text}
-            backgroundColor={theme.backgroundElement}
-            focusedBackgroundColor={theme.backgroundElement}
+            backgroundColor="transparent"
+            focusedBackgroundColor="transparent"
             cursorColor={theme.text}
             minHeight={1}
-            maxHeight={8}
+            maxHeight={Math.max(6, Math.floor(dimensions().height / 3))}
             keyBindings={[
               { name: "return", action: "submit" },
               { name: "return", shift: true, action: "newline" },
               { name: "return", ctrl: true, action: "newline" },
+              { name: "return", meta: true, action: "newline" },
               { name: "j", ctrl: true, action: "newline" },
             ]}
             onSubmit={() => void submit()}
           />
           <Show when={error()}><text fg={theme.error}>{error()}</text></Show>
-          <box flexDirection="row" gap={1} paddingBottom={1}>
-            <Show when={mode() === "shell"}><text fg={color()} attributes={TextAttributes.BOLD}>Shell</text></Show>
-            {props.footer}
+          <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
+            <PromptMetadata agent={props.agent} model={props.model} />
           </box>
         </box>
+      </box>
+      <box height={1} border={["left"]} borderColor={props.agent.color} customBorderChars={{ ...EmptyBorder, vertical: theme.backgroundElement.a !== 0 ? "╹" : " " }}>
+        <box height={1} border={["bottom"]} borderColor={theme.backgroundElement} customBorderChars={{ ...EmptyBorder, horizontal: theme.backgroundElement.a !== 0 ? "▀" : " " }} />
+      </box>
+      <box width="100%" flexDirection="row" justifyContent="space-between" gap={2}>
+        <box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Show when={props.status.running} fallback={<text fg={theme.textMuted} wrapMode="none" truncate flexGrow={1} flexShrink={1}>{props.location}</text>}>
+            <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-start">
+              <box marginLeft={1}><PromptSpinner color={props.agent.color} /></box>
+              <text fg={props.status.interruptArmed ? theme.warning : theme.text} wrapMode="none" truncate flexShrink={1}>
+                esc <span style={{ fg: props.status.interruptArmed ? theme.warning : theme.textMuted }}>{props.status.interruptArmed ? "again to interrupt" : "interrupt"}</span>
+              </text>
+            </box>
+          </Show>
+        </box>
+        {props.footerRight}
       </box>
     </box>
   )

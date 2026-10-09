@@ -34,6 +34,47 @@ export async function listMcpServers(provider: string, cwd: string): Promise<Mcp
   return []
 }
 
+export type McpHealth = "connected" | "failed" | "needs_auth"
+
+/**
+ * Live status as the current model's CLI sees it: `claude mcp list` health-checks every server with the env
+ * Paseo launches Claude with. Codex has no health check, so its enabled servers stay "configured".
+ */
+export async function mcpHealth(provider: string, cwd: string): Promise<Record<string, McpHealth>> {
+  if (provider !== "claude") return {}
+  try {
+    const child = Bun.spawn(["claude", "mcp", "list"], { cwd, env: { ...process.env, ...providerEnv("claude") }, stdin: "ignore", stdout: "pipe", stderr: "ignore" })
+    const timer = setTimeout(() => child.kill(), 30_000)
+    const text = await new Response(child.stdout).text()
+    clearTimeout(timer)
+    return parseClaudeMcpList(text)
+  } catch {
+    return {}
+  }
+}
+
+/** OpenCode's home-footer counts over the enabled servers; with no health check (Codex) enabled counts as connected. */
+export function mcpCounts(servers: McpServer[], health: Record<string, McpHealth>, checked: boolean) {
+  const enabled = servers.filter((server) => server.enabled)
+  const state = (name: string) => health[name] ?? (checked ? undefined : "connected")
+  return {
+    total: enabled.length,
+    connected: enabled.filter((server) => state(server.name) === "connected").length,
+    failed: enabled.filter((server) => state(server.name) === "failed").length,
+  }
+}
+
+/** Lines look like `cua: /path/cua-driver mcp --direct - ✔ Connected` or `x: https://… (HTTP) - ✗ Failed to connect`. */
+export function parseClaudeMcpList(text: string) {
+  const health: Record<string, McpHealth> = {}
+  for (const line of text.split("\n")) {
+    const match = line.match(/^([^\s:][^:]*): .* - ([✔✓✗✘⚠!])\s*(.*)$/)
+    if (!match) continue
+    health[match[1]!.trim()] = match[2] === "✔" || match[2] === "✓" ? "connected" : /auth/i.test(match[3]!) ? "needs_auth" : "failed"
+  }
+  return health
+}
+
 export async function setMcpEnabled(provider: string, cwd: string, name: string, enabled: boolean) {
   if (provider === "claude") return setClaudeMcp(claudeConfigFile(), cwd, name, enabled)
   if (provider === "codex") {

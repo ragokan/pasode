@@ -25,7 +25,7 @@ test("edit renders a real colored unified diff, with a split override", async ()
   expect(screen.captureCharFrame()).toContain("Edit file.txt")
   expect(screen.captureCharFrame()).toContain("before")
   expect(screen.captureCharFrame()).toContain("after")
-  const diff = screen.renderer.root.getChildren()[0]?.getChildren().find((child) => child instanceof DiffRenderable)
+  const diff = screen.renderer.root.getChildren()[0]?.getChildren().flatMap((child) => [child, ...child.getChildren()]).find((child) => child instanceof DiffRenderable)
   expect(diff).toBeInstanceOf(DiffRenderable)
   expect((diff as DiffRenderable).view).toBe("unified")
   expect((diff as DiffRenderable).addedBg).toEqual(theme.diffAddedBg)
@@ -148,6 +148,12 @@ test.each<{ detail: ToolCallDetail; text: string }>([
   expect(screen.renderer.root.getChildren()[0]?.height).toBe(1)
 })
 
+test("plain_text tools whose text repeats the label (Claude task notifications) print it once", async () => {
+  screen = await testRender(() => <TimelineRow item={tool({ type: "plain_text", label: "Pause for 5 seconds", text: "Pause for 5 seconds" })} streaming={false} showDetails={false} />, { width: 100, height: 10 })
+  await screen.flush()
+  expect(screen.captureCharFrame().match(/Pause for 5 seconds/g)).toHaveLength(1)
+})
+
 test("write uses the syntax-aware code renderer and a panel", async () => {
   screen = await testRender(() => <TimelineRow item={tool({ type: "write", filePath: "answer.ts", content: "const answer = 42" })} streaming={false} showDetails={false} />, { width: 80, height: 15 })
   await screen.flush()
@@ -170,7 +176,7 @@ test("plan renders markdown and worktree shows command status and log", async ()
     <TimelineRow item={tool({ type: "worktree_setup", worktreePath: "/work/client", branchName: "client-ui", log: "Setup complete", commands: [{ index: 0, command: "git worktree add", cwd: "/work", log: "", status: "completed", exitCode: 0 }] })} streaming={false} showDetails={false} />
   </box>, { width: 80, height: 25 })
   await screen.flush()
-  const markdown = screen.renderer.root.getChildren()[0]?.getChildren()[0]?.getChildren()[1]
+  const markdown = screen.renderer.root.getChildren()[0]?.getChildren()[0]?.getChildren().find((child) => child instanceof MarkdownRenderable)
   expect(markdown instanceof MarkdownRenderable).toBe(true)
   await Promise.all(markdown!.getChildren().filter((child): child is CodeRenderable => child instanceof CodeRenderable).map((child) => child.highlightingDone))
   await screen.flush()

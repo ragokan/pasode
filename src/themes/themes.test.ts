@@ -7,10 +7,12 @@ import { ristretto } from "../theme"
 import { listThemes, loadTheme, resolveThemeJson } from "./index"
 
 const keys = Object.keys(ristretto) as (keyof typeof ristretto)[]
-const assets = (await readdir(join(import.meta.dir, "assets"))).filter((name) => name.endsWith(".json"))
+const assets = (await readdir(join(import.meta.dir, "assets"), { recursive: true })).filter((name) => name.endsWith(".json"))
 
 describe("built-in themes", () => {
-  test("ships all 33 OpenCode themes", () => expect(assets).toHaveLength(33))
+  test("ships only OpenCode's default theme; the rest come from ~/.config/{opencode,pascode}/themes", () => {
+    expect(assets).toEqual(["v2/opencode.json"])
+  })
   for (const filename of assets) {
     for (const mode of ["dark", "light"] as const) {
       test(`${filename}: ${mode}`, async () => {
@@ -29,10 +31,27 @@ test.skipIf(!(await userTheme.exists()))("user's V2 ristretto colors", async () 
   expect(colors.background.equals(RGBA.fromHex("#2c2525"))).toBe(true)
   expect(colors.text.equals(RGBA.fromHex("#f1e3e5"))).toBe(true)
   expect(colors.accent.equals(RGBA.fromHex("#ffa5b1"))).toBe(true)
+  expect(colors.agent.equals(RGBA.fromHex("#ffa5b1"))).toBe(true)
   expect(colors.backgroundPanel.equals(ristretto.backgroundPanel)).toBe(true)
   expect(colors.backgroundElement.equals(ristretto.backgroundElement)).toBe(true)
   expect(colors.backgroundMenu.equals(ristretto.backgroundMenu)).toBe(true)
   for (const key of keys) expect(colors[key]).toBeInstanceOf(RGBA)
+})
+
+test("ristretto fixture matches every fallback token, including action/paste/shadow colors", async () => {
+  const colors = resolveThemeJson(await Bun.file(join(import.meta.dir, "fixtures/monokai-pro-ristretto.json")).json(), "dark")
+  for (const key of keys) expect(colors[key].toInts()).toEqual(ristretto[key].toInts())
+})
+
+test("2.0.26 categorical agent rule: legacy hue inference and V2 mode-specific hue order", async () => {
+  const legacy = await Bun.file(join(import.meta.dir, "fixtures/legacy-dracula.json")).json()
+  // Dracula secondary (pink) classifies as red; error is the closer red anchor, not secondary itself.
+  expect(resolveThemeJson(legacy, "dark").agent.toInts()).toEqual(RGBA.fromHex("#ff5555").toInts())
+  expect(resolveThemeJson(legacy, "light").agent.toInts()).toEqual(RGBA.fromHex("#ff5555").toInts())
+  const v2 = await Bun.file(join(import.meta.dir, "assets/v2/opencode.json")).json()
+  expect(resolveThemeJson(v2, "dark").agent.toInts()).toEqual(RGBA.fromHex("#5c9cf5").toInts())
+  expect(resolveThemeJson(v2, "light").agent.toInts()).toEqual(RGBA.fromHex("#7b5bb6").toInts())
+  expect((await loadTheme("opencode", "dark")).background.toInts()).toEqual(RGBA.fromHex("#0a0a0a").toInts())
 })
 
 test("legacy definitions, variants, references, optional colors and opacity metadata", () => {
@@ -43,8 +62,8 @@ test("legacy definitions, variants, references, optional colors and opacity meta
   const dark = resolveThemeJson(json, "dark")
   expect(dark.primary.equals(RGBA.fromHex("#123456"))).toBe(true)
   expect(dark.accent.equals(dark.primary)).toBe(true)
-  expect(dark.selectedListItemText.equals(dark.background)).toBe(true)
-  expect(dark.backgroundMenu.equals(dark.backgroundElement)).toBe(true)
+  expect(dark.selectedListItemText.equals(RGBA.fromHex("#ffffff"))).toBe(true)
+  expect(dark.backgroundMenu.equals(dark.backgroundPanel)).toBe(true)
   expect(dark.background.a).toBe(0)
   expect(Object.keys(dark).sort()).toEqual([...keys].sort())
   expect(resolveThemeJson(json, "light").primary.equals(RGBA.fromHex("#abcdef"))).toBe(true)
@@ -52,9 +71,27 @@ test("legacy definitions, variants, references, optional colors and opacity meta
 
 test("ANSI palette supports standard colors, the cube and grayscale", () => {
   for (const [index, hex] of [[0, "#000000"], [15, "#ffffff"], [16, "#000000"], [196, "#ff0000"], [231, "#ffffff"], [232, "#080808"], [255, "#eeeeee"]] as const) {
-    expect(resolveThemeJson({ theme: { primary: index } }, "dark").primary.toInts()).toEqual(RGBA.fromHex(hex).toInts())
+    expect(resolveThemeJson({ theme: { syntaxVariable: index } }, "dark").syntaxVariable.toInts()).toEqual(RGBA.fromHex(hex).toInts())
   }
   expect(() => resolveThemeJson({ theme: { primary: 256 } }, "dark")).toThrow()
+})
+
+test("contextual dialog actions inherit states and resolve aliases against the dialog surface", async () => {
+  const json = await Bun.file(join(import.meta.dir, "fixtures/monokai-pro-ristretto.json")).json()
+  json.base["@dialog"].background.action.primary.base = "$background.base"
+  json.base["@dialog"].background.action.primary.$selected = "#123456"
+  const colors = resolveThemeJson(json, "dark")
+  expect(colors.backgroundMenuActionHovered.toInts()).toEqual(colors.backgroundElement.toInts())
+  expect(colors.backgroundMenuActionFocused.toInts()).toEqual(colors.backgroundMenu.toInts())
+  expect(colors.backgroundMenuActionSelected.toInts()).toEqual(RGBA.fromHex("#123456").toInts())
+  expect(colors.backgroundActionFocused.toInts()).toEqual(colors.primary.toInts())
+})
+
+test("decrease shifts hue-backed backgrounds only; literal swatches remain unchanged", async () => {
+  const json = await Bun.file(join(import.meta.dir, "fixtures/monokai-pro-ristretto.json")).json()
+  expect(resolveThemeJson(json, "dark").backgroundPanelHover.toInts()).toEqual(RGBA.fromHex("#3f3737").toInts())
+  json.base.background.raised.base = "#362e2e"
+  expect(resolveThemeJson(json, "dark").backgroundPanelHover.toInts()).toEqual(RGBA.fromHex("#362e2e").toInts())
 })
 
 test("V2 mode overrides merge with base, aliases resolve whole palettes, input stays unchanged", () => {
@@ -110,6 +147,15 @@ test("listing is sorted and load rejects unknown names", async () => {
   await expect(loadTheme("../not-a-theme", "dark")).rejects.toThrow("Unknown theme")
 })
 
+test("every discovered user theme resolves all keys in both modes", async () => {
+  for (const entry of (await listThemes()).filter((entry) => entry.source !== "builtin")) {
+    for (const mode of ["dark", "light"] as const) {
+      const colors = await loadTheme(entry.name, mode)
+      for (const key of keys) expect(colors[key]).toBeInstanceOf(RGBA)
+    }
+  }
+})
+
 test("discovery applies builtin < opencode < pascode precedence, then loads by filename", async () => {
   const home = await mkdtemp(join(tmpdir(), "pascode-themes-"))
   try {
@@ -129,7 +175,7 @@ test("discovery applies builtin < opencode < pascode precedence, then loads by f
     expect(error).toBe("")
     expect(exit).toBe(0)
     const result = JSON.parse(output)
-    expect(result.themes).toHaveLength(34)
+    expect(result.themes).toHaveLength(2) // the default plus the temp "custom" theme
     expect(result.themes.find((theme: { name: string }) => theme.name === "opencode").source).toBe("pascode")
     expect(result.themes.find((theme: { name: string }) => theme.name === "custom").source).toBe("opencode")
     expect(result.primary).toEqual([18, 52, 86, 255])

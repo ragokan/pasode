@@ -2,17 +2,42 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { createSignal } from "solid-js"
-import { produce } from "solid-js/store"
+import { config } from "./config"
 import { dialogs } from "./dialog"
-import { agents, api, daemon, loadOlder, openSubagentTimeline, setTimeline, timeline } from "./paseo"
-import { current, draft, navigate, notify, setDraft, setSubagent, showError, subagent } from "./state"
+import { agents, api, daemon, loadOlder, timeline, type PaseoAgent } from "./paseo"
+import { current, draft, navigate, notify, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
 
 type Images = Parameters<ReturnType<typeof api.agents.ref>["send"]>[1] extends infer O ? (O extends { images?: infer I } ? I : never) : never
 
-/** New session from the draft (provider/model/effort; fork context or worktree if set). */
-export async function createSession(text: string, images?: Images) {
+/** Paseo's bypass modes: Claude "Bypass", Codex "Full Access". */
+export const BYPASS_MODE: Record<string, string> = { claude: "bypassPermissions", codex: "full-access" }
+
+/**
+ * OpenCode's agents mapped onto Paseo: Build runs with permissions bypassed (unless session.permissions is
+ * "prompt"); Plan is Claude's plan mode or Codex's plan_mode feature.
+ */
+export function agentConfig(provider: string, agent: "build" | "plan") {
+  if (agent === "plan") return provider === "codex" ? { modeId: BYPASS_MODE.codex, featureValues: { plan_mode: true } } : { modeId: "plan" }
+  return config.session?.permissions === "prompt" ? {} : { modeId: BYPASS_MODE[provider] }
+}
+
+export function agentOf(agent: { provider: string; currentModeId?: string | null; features?: { id: string; type: string; value?: unknown }[] }) {
+  const plan = agent.provider === "codex" ? agent.features?.some((feature) => feature.id === "plan_mode" && feature.value === true) : agent.currentModeId === "plan"
+  return plan ? "plan" : "build"
+}
+
+/** shift+tab on a live session: Build ⇄ Plan. */
+export async function cycleAgent(agent: PaseoAgent) {
+  const next = agentOf(agent) === "plan" ? "build" : "plan"
+  if (agent.provider === "codex") return daemon.setAgentFeature(agent.id, "plan_mode", next === "plan")
+  return daemon.setAgentMode(agent.id, next === "plan" ? "plan" : (agentConfig(agent.provider, "build").modeId ?? BYPASS_MODE.claude!))
+}
+
+/** New session from the draft (provider/model/effort/agent; fork context or worktree if set). */
+export async function createSession(text: string, images?: Images, messageId?: string) {
   const { provider, thinking, fork, worktree } = draft()
+  const modes = agentConfig(provider, draft().agent ?? "build")
   const models = draft().model ? [] : ((await api.providers.listModels(provider)).models ?? [])
   const model = draft().model ?? (models.find((m) => m.isDefault) ?? models[0])?.id
   if (!model) throw new Error(`No ${provider} models available on the daemon`)
@@ -20,47 +45,26 @@ export async function createSession(text: string, images?: Images) {
   const attachments = fork ? [fork.attachment] : undefined
   let id: string
   if (worktree) {
+    // shortcut: workspace creation takes no clientMessageId, so the first message's image chips aren't linked.
     const created = await daemon.createWorkspace({
       source: { kind: "worktree", cwd, action: "branch-off", ...(worktree.branch ? { branchName: worktree.branch } : {}) },
-      agent: { config: { provider, model, cwd, ...(thinking ? { thinkingOptionId: thinking } : {}) }, initialPrompt: text, images, attachments },
+      agent: { config: { provider, model, cwd, ...modes, ...(thinking ? { thinkingOptionId: thinking } : {}) }, initialPrompt: text, images, attachments },
     })
     if (!created.agent) throw new Error(created.error ?? "The worktree was created but its session wasn't")
     id = created.agent.id
   } else {
     const handle = await api.agents.create({
-      config: { provider: `${provider}/${model}`, ...(thinking ? { thinkingOptionId: thinking } : {}) },
+      config: { provider: `${provider}/${model}`, ...modes, ...(thinking ? { thinkingOptionId: thinking } : {}) },
       cwd,
       prompt: text,
+      clientMessageId: messageId,
       images,
       attachments,
     })
     id = handle.id
   }
-  setDraft({ ...draft(), fork: undefined, worktree: undefined })
+  setDraft({ ...draft(), fork: undefined, worktree: undefined, agent: undefined })
   return id
-}
-
-/** OpenCode's `!` shell mode: run locally in the session's directory; the output rides along with the next message. */
-export async function runShell(command: string, cwd: string) {
-  const child = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe", env: process.env })
-  const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-  let output = (stdout + stderr).trimEnd()
-  if (output.length > 8000) output = `${output.slice(0, 8000)}\n… (${output.length - 8000} more characters)`
-  // Shown locally only; Paseo's timeline is the agent's, so this row disappears on reload.
-  setTimeline(
-    produce((draft) => {
-      draft.rows.push({
-        type: "tool_call",
-        callId: `local-shell-${Date.now()}`,
-        name: "shell (local)",
-        status: exitCode === 0 ? "completed" : "failed",
-        error: exitCode === 0 ? null : `exit ${exitCode}`,
-        detail: { type: "shell", command, cwd, output, exitCode },
-      } as AgentTimelineItem)
-      draft.times.push(Date.now())
-    }),
-  )
-  return `I ran \`${command}\` in ${cwd} (exit ${exitCode}):\n\`\`\`\n${output}\n\`\`\``
 }
 
 export async function copyText(text: string) {
@@ -195,37 +199,6 @@ export async function share() {
 }
 
 /** Child sessions: Paseo child agents (labelled with their parent) and provider-native subagents (read-only). */
-export async function openChildren() {
-  const agent = current()
-  if (!agent) return
-  const [children, native] = await Promise.all([
-    daemon.fetchAgents({ filter: { labels: { "paseo.parent-agent-id": agent.id } } }).catch(() => ({ entries: [] })),
-    daemon.listProviderSubagents(agent.id).catch(() => ({ subagents: [] })),
-  ])
-  const options = [
-    ...children.entries.map(({ agent: child }) => ({
-      title: child.title || "Untitled",
-      value: `agent:${child.id}`,
-      category: "Paseo agents",
-      footer: child.status,
-    })),
-    ...native.subagents.map((child) => ({
-      title: child.title || child.description || child.id,
-      value: `native:${child.id}`,
-      category: "Subagents (read-only)",
-      footer: child.status,
-    })),
-  ]
-  if (!options.length) return notify("No subagents in this session")
-  const picked = await dialogs.select({ title: "Subagent sessions", options, size: "large" })
-  if (!picked) return
-  if (picked.startsWith("agent:")) return navigate(picked.slice(6))
-  const id = picked.slice(7)
-  const child = native.subagents.find((item) => item.id === id)!
-  setSubagent({ parentId: agent.id, id, title: child.title || child.description || id })
-  await openSubagentTimeline(agent.id, id).catch(showError)
-}
-
 export const hasParent = () => !!subagent() || !!current()?.labels?.["paseo.parent-agent-id"]
 
 export function openParent() {
