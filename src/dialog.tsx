@@ -88,6 +88,8 @@ export function DialogSelect<T>(props: {
   onSelect: (option: SelectOption<T>) => void
   onMove?: (option: SelectOption<T>) => void
   actions?: SelectAction<T>[]
+  /** false hides the search field (short lists such as /mcps). */
+  search?: boolean
 }) {
   const dimensions = useTerminalDimensions()
   const [filter, setFilter] = createSignal("")
@@ -166,19 +168,21 @@ export function DialogSelect<T>(props: {
             esc
           </text>
         </box>
-        <box paddingTop={1}>
-          <input
-            focused
-            onInput={setFilter}
-            placeholder={props.placeholder ?? "Search"}
-            placeholderColor={theme.textMuted}
-            textColor={theme.textMuted}
-            focusedTextColor={theme.textMuted}
-            backgroundColor={theme.backgroundPanel}
-            focusedBackgroundColor={theme.backgroundPanel}
-            cursorColor={theme.primary}
-          />
-        </box>
+        <Show when={props.search !== false}>
+          <box paddingTop={1}>
+            <input
+              focused
+              onInput={setFilter}
+              placeholder={props.placeholder ?? "Search"}
+              placeholderColor={theme.textMuted}
+              textColor={theme.textMuted}
+              focusedTextColor={theme.textMuted}
+              backgroundColor={theme.backgroundPanel}
+              focusedBackgroundColor={theme.backgroundPanel}
+              cursorColor={theme.primary}
+            />
+          </box>
+        </Show>
       </box>
       <Show
         when={filtered().length > 0}

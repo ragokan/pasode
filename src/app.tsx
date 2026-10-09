@@ -453,6 +453,18 @@ export function App(props: { initialAgentId?: string }) {
     const [health] = createResource(() => mcpHealth(props.provider, props.cwd))
     const file = props.provider === "claude" ? claudeConfigFile() : codexConfigFile()
     const healthColor = { connected: theme.success, failed: theme.error, needs_auth: theme.warning } satisfies Record<McpHealth, unknown>
+    const [focused, setFocused] = createSignal<string>()
+    const toggle = (name: string) => {
+      const server = servers()?.find((item) => item.name === name)
+      if (!server) return
+      setMcpEnabled(props.provider, props.cwd, server.name, !server.enabled)
+        .then(() => {
+          props.onToggle()
+          mutate(servers()!.map((item) => (item.name === server.name ? { ...item, enabled: !item.enabled } : item)))
+          setMcpRevision((value) => value + 1)
+        })
+        .catch(showError)
+    }
     return (
       <Show
         when={servers()}
@@ -476,16 +488,18 @@ export function App(props: { initialAgentId?: string }) {
                 return <text fg={!server.enabled ? theme.textMuted : state ? healthColor[state] : theme.success}>{server.enabled ? "●" : "○"}</text>
               },
             }))}
-            onSelect={(option) => {
-              const server = list().find((item) => item.name === option.value)!
-              setMcpEnabled(props.provider, props.cwd, server.name, !server.enabled)
-                .then(() => {
-                  props.onToggle()
-                  mutate(list().map((item) => (item === server ? { ...item, enabled: !item.enabled } : item)))
-                  setMcpRevision((value) => value + 1)
-                })
-                .catch(showError)
-            }}
+            search={false}
+            onMove={(option) => setFocused(option.value)}
+            onSelect={(option) => toggle(option.value)}
+            // OpenCode's dialog.mcp.toggle is space.
+            actions={[
+              {
+                title: "space",
+                label: list().find((item) => item.name === focused())?.enabled ? "disable" : "enable",
+                match: (key) => key.name === "space",
+                run: (option) => toggle(option.value),
+              },
+            ]}
           />
         )}
       </Show>
