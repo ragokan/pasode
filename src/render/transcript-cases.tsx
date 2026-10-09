@@ -13,7 +13,7 @@ afterEach(() => { screen?.renderer.destroy(); screen = undefined })
 
 const defaults: TranscriptProps = {
   rows: [], times: [], marks: [], running: false, agent: { label: "Build", color: theme.agent }, model: "Opus 5.5",
-  verbosity: "medium", thinking: "hide", grouping: "auto", details: false, timestamps: false, diffStyle: "auto", tps: true,
+  verbosity: "medium", thinking: "hide", grouping: "auto", details: false, timestamps: false, diffStyle: "auto", tps: true, markdown: "rendered", images: true,
 }
 function tool(detail: ToolCallDetail): AgentTimelineItem {
   return { type: "tool_call", name: detail.type, callId: detail.type, status: "completed", error: null, detail }

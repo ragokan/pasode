@@ -13,6 +13,9 @@ export type PascodeConfig = {
   session?: {
     sidebar?: "auto" | "show" | "hide"
     sidebarWidth?: number
+    scrollbar?: boolean
+    image_preview?: boolean
+    new_location?: "launch" | "inherit"
     thinking?: "show" | "hide"
     grouping?: "auto" | "none"
     verbosity?: "low" | "medium" | "high"

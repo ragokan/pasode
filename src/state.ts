@@ -20,6 +20,8 @@ export type Draft = {
   agent?: "plan"
   /** Transient (not remembered): start in a new git worktree, optionally on this branch. */
   worktree?: { branch?: string }
+  /** Transient: directory for the next session ("New session location: active session"); launch directory otherwise. */
+  cwd?: string
   /** Transient: a fork's chat-history attachment, source title and directory. */
   fork?: { title: string; cwd: string; attachment: Attachment }
 }
@@ -28,8 +30,13 @@ export const [draft, setDraft] = createSignal<Draft>(kvGet("draft", { provider: 
 /** A provider-native subagent (Claude Task / Codex child thread) shown read-only under its Paseo parent. */
 export const [subagent, setSubagent] = createSignal<{ parentId: string; id: string; title: string }>()
 
-type Prefs = {
+export type Prefs = {
   thinking: "show" | "hide"
+  markdown: "source" | "rendered"
+  scrollbar: boolean
+  images: boolean
+  newLocation: "launch" | "inherit"
+  permissions: "bypass" | "prompt"
   grouping: "auto" | "none"
   verbosity: "low" | "medium" | "high"
   tps: boolean
@@ -43,6 +50,11 @@ type Prefs = {
 }
 const defaults: Prefs = {
   thinking: config.session?.thinking ?? "show",
+  markdown: config.session?.markdown ?? "rendered",
+  scrollbar: config.session?.scrollbar ?? false,
+  images: config.session?.image_preview ?? false,
+  newLocation: config.session?.new_location ?? "launch",
+  permissions: config.session?.permissions ?? "bypass",
   grouping: config.session?.grouping ?? "auto",
   verbosity: config.session?.verbosity ?? "medium",
   tps: config.session?.tps ?? true,
@@ -66,7 +78,7 @@ export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
 
 export function rememberDraft(value: Draft) {
   setDraft(value)
-  const { worktree, fork, agent, ...lasting } = value
+  const { worktree, fork, agent, cwd, ...lasting } = value
   kvSet("draft", lasting)
 }
 

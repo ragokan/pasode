@@ -9,7 +9,7 @@ OpenCode (MIT). Plugins live in [`~/coding/pascode`](../pascode).
 ```sh
 bun install
 bun bin/paseo-tui.ts            # home: new session in the current directory
-bun bin/paseo-tui.ts 1c9a5b6    # open a session (full ID or `paseo ls` prefix)
+bun bin/paseo-tui.ts -s 1c9a5b6 # open a session (full ID or `paseo ls` prefix; `-s` optional)
 ```
 
 On your PATH: `chmod +x bin/paseo-tui.ts && ln -s "$PWD/bin/paseo-tui.ts" ~/.local/bin/paseo-tui`.
@@ -34,7 +34,10 @@ Same shape as OpenCode's `cli.json` where it overlaps:
 }
 ```
 
-Runtime choices (theme, toggles, last model) persist in `~/.local/state/pascode/kv.json`.
+Runtime choices (theme, toggles, last model) persist in `~/.local/state/pascode/kv.json`. `/settings` is OpenCode's
+settings dialog (←/→ changes a value) for the ones pasode honors: theme, color mode, sidebar, scrollbar, thinking,
+markdown, tool grouping, verbosity, transcript images, TPS, new session location, permissions, diff layout.
+Quitting from a session prints its title and `pasode -s <id>` to continue, like OpenCode.
 
 ## What's there
 

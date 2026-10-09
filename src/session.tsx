@@ -55,6 +55,9 @@ export type TranscriptProps = {
   timestamps: boolean
   diffStyle: "auto" | "unified" | "split"
   tps: boolean
+  markdown: "source" | "rendered"
+  /** OpenCode's session.image_preview: thumbnails in the transcript; chips either way. */
+  images: boolean
   attachments?: (row: Extract<AgentTimelineItem, { type: "user_message" }>, index: number) => { mimeType: string; data?: string; name?: string }[]
 }
 
@@ -139,7 +142,7 @@ function TranscriptEntry(props: { index: number; transcript: TranscriptProps; th
   return <Switch>
     <Match when={item().type === "user_message" && item() as Extract<AgentTimelineItem, { type: "user_message" }>}>{(message) =>
       <box border={["left"]} borderColor={props.transcript.agent.color} customBorderChars={SplitBorder} backgroundColor={theme.backgroundPanel}>
-        <SessionImages attachments={attachments()} />
+        <Show when={props.transcript.images}><SessionImages attachments={attachments()} /></Show>
         <box paddingTop={1} paddingBottom={1} paddingLeft={2} flexShrink={0} backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel} onMouseOver={() => setHover(true)} onMouseOut={() => setHover(false)}>
           <text fg={theme.text}>{collapseForkContext(message().text)}</text>
           <Show when={attachments().length}>
@@ -155,11 +158,16 @@ function TranscriptEntry(props: { index: number; transcript: TranscriptProps; th
       </box>
     }</Match>
     <Match when={item().type === "assistant_message" && imageFile((item() as Extract<AgentTimelineItem, { type: "assistant_message" }>).text)}>{(file) =>
-      <box paddingLeft={1} flexShrink={0}><SessionImages attachments={[{ mimeType: "image", path: file() }]} /></box>
+      <Show when={props.transcript.images} fallback={<box paddingLeft={3} flexShrink={0}><text>
+        <span style={{ bg: theme.accent, fg: theme.backgroundPanel, bold: true }}> file </span>
+        <span style={{ bg: theme.backgroundElement, fg: theme.textMuted }}>{` ${file().split("/").at(-1)} `}</span>
+      </text></box>}>
+        <box paddingLeft={1} flexShrink={0}><SessionImages attachments={[{ mimeType: "image", path: file() }]} /></box>
+      </Show>
     }</Match>
     <Match when={item().type === "assistant_message" && item() as Extract<AgentTimelineItem, { type: "assistant_message" }>}>{(message) =>
       <Show when={message().text.trim()}><box paddingLeft={3} flexShrink={0}>
-        <markdown syntaxStyle={syntax()} content={message().text.trim()} streaming={streaming()} internalBlockMode="top-level" tableOptions={{ style: "grid", cellPaddingX: 1 }} conceal fg={theme.markdownText} bg={theme.background} />
+        <markdown syntaxStyle={syntax()} content={message().text.trim()} streaming={streaming()} internalBlockMode="top-level" tableOptions={{ style: "grid", cellPaddingX: 1 }} conceal={props.transcript.markdown !== "source"} fg={theme.markdownText} bg={theme.background} />
       </box></Show>
     }</Match>
     <Match when={item().type === "reasoning" && item() as Extract<AgentTimelineItem, { type: "reasoning" }>}>{(thought) =>

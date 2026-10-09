@@ -76,7 +76,7 @@ export interface SelectAction<T> {
   label: string
   title: string
   match: (key: KeyEvent) => boolean
-  run: (option: SelectOption<T>) => void
+  run: (option: SelectOption<T>, key: KeyEvent) => void
 }
 
 export function DialogSelect<T>(props: {
@@ -149,7 +149,7 @@ export function DialogSelect<T>(props: {
       if (key.name === "return") return submit(), true
       const action = props.actions?.find((item) => item.match(key))
       const option = filtered()[selected()]
-      if (action && option) return action.run(option), true
+      if (action && option) return action.run(option, key), true
       return false
     })()
     if (handled) key.preventDefault()

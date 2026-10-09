@@ -2,10 +2,9 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { createSignal } from "solid-js"
-import { config } from "./config"
 import { dialogs } from "./dialog"
 import { agents, api, daemon, findModel, loadOlder, timeline, type PaseoAgent } from "./paseo"
-import { current, draft, navigate, notify, setDraft, showError, subagent } from "./state"
+import { current, draft, navigate, notify, prefs, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
 
 type Images = Parameters<ReturnType<typeof api.agents.ref>["send"]>[1] extends infer O ? (O extends { images?: infer I } ? I : never) : never
@@ -19,7 +18,7 @@ export const BYPASS_MODE: Record<string, string> = { claude: "bypassPermissions"
  */
 export function agentConfig(provider: string, agent: "build" | "plan") {
   if (agent === "plan") return provider === "codex" ? { modeId: BYPASS_MODE.codex, featureValues: { plan_mode: true } } : { modeId: "plan" }
-  return config.session?.permissions === "prompt" ? {} : { modeId: BYPASS_MODE[provider] }
+  return prefs.permissions === "prompt" ? {} : { modeId: BYPASS_MODE[provider] }
 }
 
 export function agentOf(agent: { provider: string; currentModeId?: string | null; features?: { id: string; type: string; value?: unknown }[] }) {
@@ -43,7 +42,7 @@ export async function createSession(text: string, images?: Images, messageId?: s
   if (!model) throw new Error(`No ${provider} models available on the daemon`)
   // Send the variant the prompt shows: without one the daemon leaves effort unset (provider default), not its catalog default.
   const thinking = draft().thinking ?? (models.find((m) => m.id === model) ?? findModel(provider, model))?.defaultThinkingOptionId ?? undefined
-  const cwd = fork?.cwd ?? process.cwd()
+  const cwd = fork?.cwd ?? draft().cwd ?? process.cwd()
   const attachments = fork ? [fork.attachment] : undefined
   let id: string
   if (worktree) {
@@ -65,7 +64,7 @@ export async function createSession(text: string, images?: Images, messageId?: s
     })
     id = handle.id
   }
-  setDraft({ ...draft(), fork: undefined, worktree: undefined, agent: undefined })
+  setDraft({ ...draft(), fork: undefined, worktree: undefined, agent: undefined, cwd: undefined })
   return id
 }
 

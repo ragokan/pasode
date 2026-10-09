@@ -1,15 +1,19 @@
 import { render } from "@opentui/solid"
 import { App } from "./app"
-import { connect, disconnect } from "./paseo"
+import { sessionEpilogue } from "./logo"
+import { agents, connect, disconnect } from "./paseo"
+import { rendererOptions } from "./renderer"
+import { agentId } from "./state"
 
-const usage = `paseo-tui [agent-id]
+const usage = `paseo-tui [-s] [agent-id]
 
 OpenCode-style terminal client for a running Paseo daemon.
 New sessions start in the current directory.
 
 env: PASEO_URL (default ws://127.0.0.1:6767/ws), PASEO_PASSWORD`
 
-const arg = process.argv[2]
+// `pasode -s <id>` like `opencode -s`; a bare id (or `paseo ls` prefix) works too.
+const arg = ["-s", "--session"].includes(process.argv[2] ?? "") ? process.argv[3] : process.argv[2]
 if (arg === "-h" || arg === "--help") {
   console.log(usage)
   process.exit(0)
@@ -24,6 +28,10 @@ try {
 }
 
 await render(() => <App initialAgentId={arg} />, {
-  exitOnCtrlC: false,
-  onDestroy: () => void disconnect().finally(() => process.exit(0)),
+  ...rendererOptions,
+  onDestroy: () => {
+    const id = agentId()
+    if (id) process.stdout.write(sessionEpilogue({ title: agents[id]?.title || "Untitled", id }) + "\n")
+    void disconnect().finally(() => process.exit(0))
+  },
 })

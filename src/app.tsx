@@ -19,6 +19,7 @@ import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PRO
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript } from "./session"
+import { DialogSettings } from "./settings"
 import { Sidebar } from "./sidebar"
 import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDraft, setPref, showError, subagent, toast } from "./state"
 import { applyTheme, theme } from "./theme"
@@ -68,7 +69,7 @@ export function App(props: { initialAgentId?: string }) {
   const builtins: Command[] = [
     { id: "command.palette", title: "Commands", category: "System", keybind: "ctrl+p", hidden: true, run: openPalette },
     { id: "session.list", title: "Switch session", category: "Session", keybind: "<leader>l", slash: "sessions", run: openSessions },
-    { id: "session.new", title: "New session", category: "Session", keybind: "<leader>n", slash: "new", run: () => navigate(undefined) },
+    { id: "session.new", title: "New session", category: "Session", keybind: "<leader>n", slash: "new", run: newSession },
     { id: "session.new.worktree", title: "New session in a git worktree", category: "Session", slash: "worktree", run: () => actions.newWorktreeDraft() },
     { id: "session.interrupt", title: "Interrupt session", category: "Session", keybind: "escape", enabled: running, run: interrupt },
     { id: "session.rename", title: "Rename session", category: "Session", slash: "rename", enabled: () => !!current(), run: () => actions.rename() },
@@ -107,12 +108,18 @@ export function App(props: { initialAgentId?: string }) {
     { id: "session.diffs", title: "Cycle diff style: auto / unified / split", category: "View", slash: "diffs", run: cycleDiffs },
     { id: "theme.list", title: "Switch theme", category: "View", keybind: "<leader>t", slash: "themes", run: openThemes },
     { id: "editor.open", title: "Open prompt in $EDITOR", category: "Prompt", keybind: "<leader>e", slash: "editor", run: () => void prompt?.openEditor() },
+    { id: "settings.show", title: "Open settings", category: "System", slash: "settings", run: () => dialog.replace(() => <DialogSettings />) },
     { id: "help.show", title: "Help", category: "System", keybind: "<leader>h", slash: "help", run: openHelp },
     { id: "status.show", title: "Status", category: "System", slash: "status", run: openStatus },
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
   ]
   registerCommands(builtins)
   const keymap = createKeymap(commandBindings)
+
+  function newSession() {
+    setDraft({ ...draft(), cwd: prefs.newLocation === "inherit" ? current()?.cwd : undefined })
+    navigate(undefined)
+  }
 
   function openPalette() {
     const options = commands()
@@ -431,10 +438,10 @@ export function App(props: { initialAgentId?: string }) {
   function openMcp() {
     const agent = current()
     const provider = agent?.provider ?? draft().provider
-    const cwd = agent?.cwd ?? process.cwd()
+    const dir = agent?.cwd ?? draft().cwd ?? process.cwd()
     let changed = false
     dialog.replace(
-      () => <McpList provider={provider} cwd={cwd} onToggle={() => (changed = true)} />,
+      () => <McpList provider={provider} cwd={dir} onToggle={() => (changed = true)} />,
       "medium",
       // Providers read MCP config at session start, so reload once the list closes.
       () => changed && agent && reload(agent.id, true),
@@ -608,7 +615,7 @@ export function App(props: { initialAgentId?: string }) {
     const variant = agent ? (agent.thinkingOptionId ?? agent.effectiveThinkingOptionId) : (draft().thinking ?? findModel(provider, id)?.defaultThinkingOptionId)
     return { name: modelLabel(provider, id), provider: providerName(provider), variant: variant ?? undefined }
   }
-  const cwd = () => current()?.cwd ?? process.cwd()
+  const cwd = () => current()?.cwd ?? draft().cwd ?? process.cwd()
   const [branch] = createResource(cwd, async (dir) => {
     try {
       const child = Bun.spawn(["git", "branch", "--show-current"], { cwd: dir, stdout: "pipe", stderr: "ignore" })
@@ -694,7 +701,7 @@ export function App(props: { initialAgentId?: string }) {
     const [mcp] = createResource(
       () => [draft().provider, mcpRevision()] as const,
       async ([provider]) => {
-        const [servers, health] = await Promise.all([listMcpServers(provider, process.cwd()), mcpHealth(provider, process.cwd())])
+        const [servers, health] = await Promise.all([listMcpServers(provider, cwd()), mcpHealth(provider, cwd())])
         return mcpCounts(servers, health, provider === "claude")
       },
     )
@@ -760,7 +767,14 @@ export function App(props: { initialAgentId?: string }) {
         <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={padding()} paddingRight={padding()}>
           <Slot name="session_header" agent={current()} />
           <box flexGrow={1} minHeight={0} position="relative">
-            <scrollbox ref={(r: ScrollBoxRenderable) => (scroll = r)} flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
+            <scrollbox
+              ref={(r: ScrollBoxRenderable) => (scroll = r)}
+              flexGrow={1}
+              stickyScroll
+              stickyStart="bottom"
+              viewportOptions={{ paddingRight: prefs.scrollbar ? 1 : 0 }}
+              verticalScrollbarOptions={{ paddingLeft: 1, visible: prefs.scrollbar, trackOptions: { backgroundColor: theme.backgroundElement, foregroundColor: theme.border } }}
+            >
               <Show when={timeline.loading}>
                 <box paddingLeft={3} marginTop={1}>
                   <Spinner>Loading session…</Spinner>
@@ -785,6 +799,8 @@ export function App(props: { initialAgentId?: string }) {
                 timestamps={prefs.timestamps}
                 diffStyle={prefs.diffs}
                 tps={prefs.tps}
+                markdown={prefs.markdown}
+                images={prefs.images}
                 attachments={attachmentsOf}
               />
             </scrollbox>

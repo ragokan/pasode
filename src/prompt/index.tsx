@@ -142,6 +142,11 @@ export function Prompt(props: PromptProps) {
     }
   }
 
+  // OpenCode's prompt reclaims focus whenever nothing covers it (e.g. after a dialog or a remount).
+  createEffect(() => {
+    if (props.focused && input && !input.isDestroyed && !input.focused) input.focus()
+  })
+
   const api: PromptRef = {
     text: () => input?.plainText ?? text(),
     setText: (value) => { generation++; setText(value) },
