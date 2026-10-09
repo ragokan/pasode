@@ -1,0 +1,195 @@
+import { createPaseoApi, type PaseoAgent, type PaseoAgentStream, type PaseoProviderUsageResult } from "@getpaseo/client"
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client"
+import { readFileSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { createSignal } from "solid-js"
+import { createStore, produce, reconcile } from "solid-js/store"
+import { applyTimelineItem, dropStaleCompactions, type AgentTimelineItem } from "./timeline"
+
+export type { PaseoAgent }
+
+export const PROVIDERS = ["claude", "codex"] as const
+
+/** PASEO_URL, else the daemon's configured TCP listen address (what `paseo status` reports), else the default port. */
+function daemonUrl() {
+  if (process.env.PASEO_URL) return process.env.PASEO_URL
+  const home = process.env.PASEO_HOME ?? path.join(os.homedir(), ".paseo")
+  try {
+    const listen = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8")).daemon?.listen
+    if (typeof listen === "string" && /^[\w.-]+:\d+$/.test(listen)) return `ws://${listen}/ws`
+  } catch {}
+  return "ws://127.0.0.1:6767/ws"
+}
+
+// The internal DaemonClient is what the public SDK wraps; we need it for cancel/mode/model.
+export const daemon = new DaemonClient({
+  url: daemonUrl(),
+  password: process.env.PASEO_PASSWORD,
+  clientId: `paseo-tui-${crypto.randomUUID()}`,
+  clientType: "cli",
+})
+export const api = createPaseoApi(daemon)
+
+export async function connect() {
+  await daemon.connect()
+  const list = await api.agents.list({ filter: { includeArchived: false }, page: { limit: 200 }, subscribe: {} })
+  setAgents(reconcile(Object.fromEntries(list.entries.map(({ agent }) => [agent.id, agent]))))
+  list.subscription.subscribe({
+    snapshot: ({ entries }) => setAgents(reconcile(Object.fromEntries(entries.map(({ agent }) => [agent.id, agent])))),
+    update(message) {
+      if (message.type !== "agent_update") return
+      const update = message.payload
+      if (update.kind === "upsert" && !update.agent.archivedAt) setAgents(update.agent.id, reconcile(update.agent))
+      else {
+        const id = update.kind === "upsert" ? update.agent.id : update.agentId
+        setAgents(produce((all) => delete all[id]))
+      }
+    },
+  })
+}
+
+export async function disconnect() {
+  await api.dispose().catch(() => {})
+  await daemon.close().catch(() => {})
+}
+
+/** Every non-archived Paseo agent, live. */
+export const [agents, setAgents] = createStore<Record<string, PaseoAgent>>({})
+
+type Cursor = NonNullable<Awaited<ReturnType<ReturnType<typeof api.agents.ref>["timeline"]["refetch"]>>["startCursor"]>
+
+/** Timing marks for plugins' Speed/TTFT metrics (pascode token-metrics). */
+export type Mark =
+  | { kind: "item"; type: string; at: number; callId?: string; status?: string }
+  | { kind: "turn_started"; at: number }
+  | { kind: "turn_completed"; at: number; outputTokens?: number }
+
+/** Rendered timeline of the open session: rows, each row's start time, timing marks for metrics, and paging state. */
+export const [timeline, setTimeline] = createStore<{
+  agentId?: string
+  rows: AgentTimelineItem[]
+  times: number[]
+  marks: Mark[]
+  loading: boolean
+  hasOlder: boolean
+  startCursor?: Cursor
+}>({ rows: [], times: [], marks: [], loading: false, hasOlder: false })
+
+const PAGE = 300
+
+/** Prepends the previous page of history (the newest PAGE entries load on open). */
+export async function loadOlder() {
+  const { agentId, startCursor, hasOlder } = timeline
+  if (!agentId || !startCursor || !hasOlder) return false
+  const page = await api.agents.ref(agentId).timeline.refetch({ direction: "before", cursor: startCursor, limit: PAGE, projection: "projected" })
+  if (timeline.agentId !== agentId) return false
+  setTimeline(
+    produce((draft) => {
+      const entries = dropStaleCompactions(page.entries)
+      draft.rows.unshift(...entries.map((entry) => entry.item))
+      draft.times.unshift(...entries.map((entry) => Date.parse(entry.timestamp)))
+      draft.marks.unshift(...entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))))
+      draft.hasOlder = page.hasOlder && !!page.startCursor
+      draft.startCursor = page.startCursor ?? undefined
+    }),
+  )
+  return page.entries.length > 0
+}
+
+function itemMark(item: AgentTimelineItem, at: number): Mark {
+  return item.type === "tool_call"
+    ? { kind: "item", type: item.type, at, callId: item.callId, status: item.status }
+    : { kind: "item", type: item.type, at }
+}
+
+/** Bumped after MCP toggles so the sidebar rereads provider config. */
+export const [mcpRevision, setMcpRevision] = createSignal(0)
+
+/** Claude/Codex plan windows as the daemon reports them (same data as the Paseo app). */
+export const [usage, setUsage] = createSignal<PaseoProviderUsageResult["providers"]>()
+
+export async function refreshUsage() {
+  const result = await api.providers.listUsage().catch(() => undefined)
+  if (result) setUsage(result.providers)
+}
+
+let closeTimeline: (() => void) | undefined
+
+/** Read-only timeline of a provider-native subagent; Paseo has no stream for these, so poll while open. */
+export async function openSubagentTimeline(parentId: string, subagentId: string) {
+  closeTimeline?.()
+  const key = `${parentId}:${subagentId}`
+  setTimeline({ agentId: key, rows: [], times: [], marks: [], loading: true, hasOlder: false, startCursor: undefined })
+  const load = async () => {
+    const page = await daemon.fetchProviderSubagentTimeline(parentId, subagentId, { direction: "tail", limit: 0 })
+    if (timeline.agentId !== key) return
+    if (page.error) throw new Error(page.error)
+    setTimeline({
+      rows: page.rows.map((row) => row.item),
+      times: page.rows.map((row) => Date.parse(row.timestamp)),
+      loading: false,
+    })
+  }
+  const timer = setInterval(() => void load().catch(() => {}), 2000)
+  closeTimeline = () => clearInterval(timer)
+  await load()
+}
+
+export async function openTimeline(agentId: string | undefined) {
+  closeTimeline?.()
+  closeTimeline = undefined
+  setTimeline({ agentId, rows: [], times: [], marks: [], loading: !!agentId, hasOlder: false, startCursor: undefined })
+  if (!agentId) return
+
+  const handle = api.agents.ref(agentId)
+  let lastSeq = 0
+  let buffered: PaseoAgentStream[] | undefined = []
+  const mark = (value: Mark) => setTimeline("marks", produce((marks) => void marks.push(value)))
+  const apply = ({ event, seq, timestamp }: PaseoAgentStream) => {
+    const at = Date.parse(timestamp)
+    if (event.type === "turn_started") return mark({ kind: "turn_started", at })
+    if (event.type === "turn_completed") return mark({ kind: "turn_completed", at, outputTokens: event.usage?.outputTokens })
+    if (event.type !== "timeline") return
+    if (seq !== undefined && seq <= lastSeq) return // already in the fetched history
+    if (seq !== undefined) lastSeq = seq
+    setTimeline(
+      produce((draft) => {
+        const before = draft.rows.length
+        applyTimelineItem(draft.rows, event.item)
+        if (draft.rows.length > before) draft.times.push(at)
+        draft.marks.push(itemMark(event.item, at))
+      }),
+    )
+  }
+  const load = async () => {
+    buffered ??= []
+    const page = await handle.timeline.refetch({ direction: "before", limit: PAGE, projection: "projected" })
+    if (timeline.agentId !== agentId) return
+    lastSeq = page.endCursor?.seq ?? 0
+    const entries = dropStaleCompactions(page.entries)
+    setTimeline({
+      rows: entries.map((entry) => entry.item),
+      times: entries.map((entry) => Date.parse(entry.timestamp)),
+      marks: entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))),
+      loading: false,
+      // After a rewind the daemon reports hasOlder with no cursor to page from.
+      hasOlder: page.hasOlder && !!page.startCursor,
+      startCursor: page.startCursor ?? undefined,
+    })
+    const pending = buffered
+    buffered = undefined
+    for (const message of pending) apply(message)
+  }
+
+  const unsubscribe = handle.timeline.subscribe((message) => {
+    // Reconnects and history rewrites invalidate what we have; refetch.
+    if (message.event.type === "replacement" || message.event.type === "subscription_restored") return void load()
+    if (!("timestamp" in message)) return
+    if (buffered) buffered.push(message)
+    else apply(message)
+  })
+  closeTimeline = unsubscribe
+  await unsubscribe.ready
+  await load()
+}
