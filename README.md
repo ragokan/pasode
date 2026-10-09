@@ -51,7 +51,7 @@ Runtime choices (theme, toggles, last model) persist in `~/.local/state/pascode/
 - **Prompt**: only what Paseo takes: the typed text, sent as-is, plus native image attachments (`ctrl+v` or a pasted
   image path; thumbnails above the input, click or backspace-on-empty removes). `/` commands (ours plus the session's
   own commands and skills), `$EDITOR` (`ctrl+x e`), mid-turn messages steer the turn.
-- **Agent**: model (`ctrl+x m`), variant cycle (`ctrl+t`, also `cmd+t` where the terminal passes it; `/variants`
+- **Agent**: model (`ctrl+x m`), variant cycle (`ctrl+t`; `/variants`
   lists them), fast mode, Paseo mode (`/mode`), MCP servers (`/mcps`, live Claude health).
 - **Rendering**: OpenCode 2.0.26's transcript: collapsed activity groups by `verbosity`, reasoning, tool blocks,
   colored unified/split diffs, image thumbnails (sent images and images tools return), `Build · model · time · tok/s`

@@ -93,7 +93,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "messages.previous", title: "Previous message", category: "Navigation", keybind: "<leader>[", run: () => jumpMessage(-1) },
     { id: "messages.next", title: "Next message", category: "Navigation", keybind: "<leader>]", run: () => jumpMessage(1) },
     { id: "model.list", title: "Switch model", category: "Agent", keybind: "<leader>m", slash: "models", run: openModels },
-    { id: "variant.cycle", title: "Cycle model variants", category: "Agent", keybind: "ctrl+t,super+t", run: cycleVariant },
+    { id: "variant.cycle", title: "Cycle model variants", category: "Agent", keybind: "ctrl+t", run: cycleVariant },
     { id: "variant.list", title: "Switch model variant", category: "Agent", slash: "variants", run: openEffort },
     { id: "agent.fast", title: "Toggle fast mode", category: "Agent", slash: "fast", enabled: () => !!fastFeature(), run: toggleFast },
     { id: "mode.list", title: "Switch mode", category: "Agent", slash: "mode", enabled: () => !!current()?.availableModes?.length, run: openModes },
