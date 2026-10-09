@@ -5,7 +5,6 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ThemeColors } from "../theme"
 import { tint } from "./color"
-import { migrateV1 } from "./v1-migrate"
 
 type Mode = "dark" | "light"
 type ThemeSource = "builtin" | "opencode" | "pascode"
@@ -14,7 +13,6 @@ type ThemeEntry = { name: string; source: ThemeSource; path: string }
 async function discoverThemes(): Promise<ThemeEntry[]> {
   const themes = new Map<string, ThemeEntry>()
   const directories: [ThemeSource, string][] = [
-    ["builtin", join(import.meta.dir, "assets")],
     ["builtin", join(import.meta.dir, "assets/v2")],
     ["opencode", join(homedir(), ".config/opencode/themes")],
     ["pascode", join(homedir(), ".config/pascode/themes")],
@@ -128,22 +126,16 @@ const tokenPaths = {
 
 export function resolveThemeJson(json: unknown, mode: Mode): ThemeColors {
   if (!isRecord(json)) throw new Error("Theme must be a JSON object")
-  if (!isRecord(json.theme)) return resolvePalette(json, mode)
-  const selected = json.theme.selectedListItemText !== undefined
-  return resolvePalette(migrateV1({
-    light: { ...resolvePalette(json, "light"), _hasSelectedListItemText: selected },
-    dark: { ...resolvePalette(json, "dark"), _hasSelectedListItemText: selected },
-  }), mode)
+  if (isRecord(json.theme)) throw new Error("OpenCode 1.x themes (a top-level \"theme\" object) aren't supported; use the base/dark/light format")
+  return resolvePalette(json, mode)
 }
 
 function resolvePalette(json: Record<string, unknown>, mode: Mode): ThemeColors {
-  const legacy = isRecord(json.theme)
-  if (!legacy && !isRecord(json.base)) throw new Error("Theme requires a theme or base object")
-  const activeMode = !legacy && json[mode] === undefined ? (mode === "dark" ? "light" : "dark") : mode
+  if (!isRecord(json.base)) throw new Error("Theme requires a base object")
+  const activeMode = json[mode] === undefined ? (mode === "dark" ? "light" : "dark") : mode
   const variant = json[activeMode]
-  if (!legacy && !isRecord(variant)) throw new Error("Theme requires a dark or light mode object")
-  const tokens = legacy ? json.theme as Record<string, unknown> : expandTokens(merge(json.base as Record<string, unknown>, variant as Record<string, unknown>))
-  const defs = isRecord(json.defs) ? json.defs : {}
+  if (!isRecord(variant)) throw new Error("Theme requires a dark or light mode object")
+  const tokens = expandTokens(merge(json.base, variant))
   const dialog = isRecord(tokens["@dialog"]) ? contextualize(tokens, expandTokens(tokens["@dialog"])) : tokens
 
   function reference(path: string, chain: string[] = [], source = tokens): unknown {
@@ -172,27 +164,25 @@ function resolvePalette(json: Record<string, unknown>, mode: Mode): ThemeColors 
       return RGBA.fromHex(value)
     }
     if (chain.includes(value)) throw new Error(`Circular color reference: ${[...chain, value].join(" -> ")}`)
-    const next = legacy
-      ? (Object.hasOwn(defs, value) ? defs[value] : Object.hasOwn(tokens, value) ? tokens[value] : undefined)
-      : reference(value.startsWith("$") ? value.slice(1) : value)
+    const next = reference(value.startsWith("$") ? value.slice(1) : value)
     if (next === undefined) throw new Error(`Color reference not found: ${value}`)
     return color(next, [...chain, value])
   }
 
   const resolved: Partial<ThemeColors> = {}
   for (const key of Object.keys(tokenPaths) as (keyof ThemeColors)[]) {
-    if (!legacy && (key === "agent" || !tokenPaths[key])) continue
-    const value = legacy ? tokens[key] : reference(tokenPaths[key])
+    if (key === "agent" || !tokenPaths[key]) continue
+    const value = reference(tokenPaths[key])
     if (value !== undefined) resolved[key] = color(value)
   }
-  if (!legacy && tokens.categorical !== undefined) {
+  if (tokens.categorical !== undefined) {
     if (!Array.isArray(tokens.categorical) || !tokens.categorical.length || tokens.categorical.some((name) => typeof name !== "string")) {
       throw new Error("Theme categorical must be a non-empty array of hue names")
     }
     for (const name of tokens.categorical) color(reference(`hue.${name}.200`, ["categorical"]))
     resolved.agent = color(reference(`hue.${tokens.categorical[0]}.200`, ["categorical"]))
   }
-  if (!legacy) {
+  {
     // decrease() only shifts hue references, never literal colors that happen to match a swatch.
     const decrease = (path: string): RGBA | undefined => {
       let value: unknown = tokens

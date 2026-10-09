@@ -43,37 +43,22 @@ test("ristretto fixture matches every fallback token, including action/paste/sha
   for (const key of keys) expect(colors[key].toInts()).toEqual(ristretto[key].toInts())
 })
 
-test("2.0.26 categorical agent rule: legacy hue inference and V2 mode-specific hue order", async () => {
-  const legacy = await Bun.file(join(import.meta.dir, "fixtures/legacy-dracula.json")).json()
-  // Dracula secondary (pink) classifies as red; error is the closer red anchor, not secondary itself.
-  expect(resolveThemeJson(legacy, "dark").agent.toInts()).toEqual(RGBA.fromHex("#ff5555").toInts())
-  expect(resolveThemeJson(legacy, "light").agent.toInts()).toEqual(RGBA.fromHex("#ff5555").toInts())
+test("2.0.26 categorical agent rule: mode-specific hue order", async () => {
   const v2 = await Bun.file(join(import.meta.dir, "assets/v2/opencode.json")).json()
   expect(resolveThemeJson(v2, "dark").agent.toInts()).toEqual(RGBA.fromHex("#5c9cf5").toInts())
   expect(resolveThemeJson(v2, "light").agent.toInts()).toEqual(RGBA.fromHex("#7b5bb6").toInts())
   expect((await loadTheme("opencode", "dark")).background.toInts()).toEqual(RGBA.fromHex("#0a0a0a").toInts())
 })
 
-test("legacy definitions, variants, references, optional colors and opacity metadata", () => {
-  const json = {
-    defs: { blue: { dark: "#123456", light: "#abcdef" }, alias: "blue" },
-    theme: { primary: "alias", accent: "primary", background: "transparent", thinkingOpacity: 0.4 },
-  }
-  const dark = resolveThemeJson(json, "dark")
-  expect(dark.primary.equals(RGBA.fromHex("#123456"))).toBe(true)
-  expect(dark.accent.equals(dark.primary)).toBe(true)
-  expect(dark.selectedListItemText.equals(RGBA.fromHex("#ffffff"))).toBe(true)
-  expect(dark.backgroundMenu.equals(dark.backgroundPanel)).toBe(true)
-  expect(dark.background.a).toBe(0)
-  expect(Object.keys(dark).sort()).toEqual([...keys].sort())
-  expect(resolveThemeJson(json, "light").primary.equals(RGBA.fromHex("#abcdef"))).toBe(true)
+test("OpenCode 1.x themes are rejected with a clear error", () => {
+  expect(() => resolveThemeJson({ theme: { primary: "#123456" } }, "dark")).toThrow("1.x")
 })
 
 test("ANSI palette supports standard colors, the cube and grayscale", () => {
   for (const [index, hex] of [[0, "#000000"], [15, "#ffffff"], [16, "#000000"], [196, "#ff0000"], [231, "#ffffff"], [232, "#080808"], [255, "#eeeeee"]] as const) {
-    expect(resolveThemeJson({ theme: { syntaxVariable: index } }, "dark").syntaxVariable.toInts()).toEqual(RGBA.fromHex(hex).toInts())
+    expect(resolveThemeJson({ base: { syntax: { variable: index } }, dark: {} }, "dark").syntaxVariable.toInts()).toEqual(RGBA.fromHex(hex).toInts())
   }
-  expect(() => resolveThemeJson({ theme: { primary: 256 } }, "dark")).toThrow()
+  expect(() => resolveThemeJson({ base: { syntax: { variable: 256 } }, dark: {} }, "dark")).toThrow()
 })
 
 test("contextual dialog actions inherit states and resolve aliases against the dialog surface", async () => {
@@ -121,7 +106,10 @@ test("V2 uses the available mode when only one is defined", () => {
 })
 
 test("missing colors derive from the theme, not ristretto", () => {
-  const colors = resolveThemeJson({ theme: { text: "#123456", primary: "#654321", success: "#00ff00", error: "#ff0000" } }, "light")
+  const colors = resolveThemeJson({
+    base: { text: { base: "#123456", feedback: { success: { base: "#00ff00" }, error: { base: "#ff0000" } } }, hue: { interactive: { "200": "#654321" } } },
+    light: {},
+  }, "light")
   expect(colors.markdownText.equals(colors.text)).toBe(true)
   expect(colors.markdownLink.equals(colors.primary)).toBe(true)
   expect(colors.diffAdded.equals(colors.success)).toBe(true)
@@ -131,11 +119,10 @@ test("missing colors derive from the theme, not ristretto", () => {
 })
 
 test("rejects invalid theme shapes, colors, missing references and cycles", () => {
-  for (const json of [null, [], {}, { base: {} }, { theme: { primary: "#nothex" } }, { theme: { text: "missing" } }]) {
+  for (const json of [null, [], {}, { base: {} }, { base: { text: { base: "#nothex" } }, dark: {} }, { base: { text: { base: "missing" } }, dark: {} }]) {
     expect(() => resolveThemeJson(json, "dark")).toThrow()
   }
   expect(() => resolveThemeJson({ base: { text: { base: "$missing.token" } }, dark: {} }, "dark")).toThrow("not found")
-  expect(() => resolveThemeJson({ defs: { a: "b", b: "a" }, theme: { primary: "a" } }, "dark")).toThrow("Circular")
   expect(() => resolveThemeJson({ base: { text: { base: "$text.muted", muted: "$text.base" } }, dark: {} }, "dark")).toThrow("Circular")
   expect(() => resolveThemeJson({ base: {}, dark: { hue: { interactive: "$hue.accent", accent: "$hue.interactive" } } }, "dark")).toThrow("Circular")
 })
@@ -162,9 +149,9 @@ test("discovery applies builtin < opencode < pascode precedence, then loads by f
     for (const source of ["opencode", "pascode"]) {
       const directory = join(home, ".config", source, "themes")
       await mkdir(directory, { recursive: true })
-      await Bun.write(join(directory, "opencode.json"), JSON.stringify({ theme: { primary: source === "pascode" ? "#123456" : "#654321" } }))
+      await Bun.write(join(directory, "opencode.json"), JSON.stringify({ base: { hue: { interactive: { "200": source === "pascode" ? "#123456" : "#654321" } } }, dark: {} }))
     }
-    await Bun.write(join(home, ".config/opencode/themes/custom.json"), JSON.stringify({ theme: { primary: "#abcdef" } }))
+    await Bun.write(join(home, ".config/opencode/themes/custom.json"), JSON.stringify({ base: { hue: { interactive: { "200": "#abcdef" } } }, dark: {} }))
     const script = `
       import { listThemes, loadTheme } from ${JSON.stringify(join(import.meta.dir, "index.ts"))};
       const themes = await listThemes();
