@@ -28,14 +28,14 @@ test("↓ composer lists running child sessions, switches tabs, toggles finished
   await screen.renderOnce()
   let frame = screen.captureCharFrame()
   expect(frame).toContain("Subagents  Shell")
-  expect(frame).toContain("Agent · Session a")
+  expect(frame).toMatch(/Agent: Session a\s+Running/)
   expect(frame).not.toContain("Session b")
   expect(frame).toContain("enter open  ctrl+d interrupt  ctrl+a finished")
 
   handleComposerKey(key("a", true))
   await screen.renderOnce()
   frame = screen.captureCharFrame()
-  expect(frame).toContain("Agent · Session b")
+  expect(frame).toContain("Agent: Session b")
   expect(frame).not.toContain("Session a ")
 
   handleComposerKey(key("right"))

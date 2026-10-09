@@ -36,8 +36,9 @@ export const subagents = createMemo<SubagentEntry[]>(() => {
       key: `native:${item.id}`,
       kind: "native",
       id: item.id,
-      agent: item.subtitle || "Subagent",
-      title: item.title || item.description || item.id,
+      // OpenCode's "Agent: title": the subagent type (Claude's Task type, e.g. general-purpose), then its task.
+      agent: (item.title || "Subagent").replace(/^\w/, (letter) => letter.toUpperCase()),
+      title: item.description || item.subtitle || item.id,
       status: item.status,
     })),
   ]
@@ -147,7 +148,7 @@ export function Composer() {
   let scroll: ScrollBoxRenderable | undefined
   const items = createMemo(() =>
     tab() === "subagents"
-      ? visibleSubagents().map((entry) => ({ key: entry.key, text: `${entry.agent} · ${entry.title}`, meta: entry.status }))
+      ? visibleSubagents().map((entry) => ({ key: entry.key, text: `${entry.agent}: ${entry.title}`, meta: entry.status === "running" ? "Running" : "" }))
       : visibleShells().map((shell) => ({ key: shell.id, text: shell.title || shell.name, meta: shell.activity?.state ?? "" })),
   )
   createEffect(() => {
@@ -190,6 +191,7 @@ export function Composer() {
                     id={`composer-${item.key}`}
                     flexDirection="row"
                     justifyContent="space-between"
+                    gap={1}
                     paddingLeft={1}
                     paddingRight={1}
                     backgroundColor={index() === selected() ? theme.backgroundElement : undefined}
