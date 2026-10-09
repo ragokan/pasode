@@ -4,7 +4,7 @@ import path from "node:path"
 import { createSignal } from "solid-js"
 import { config } from "./config"
 import { dialogs } from "./dialog"
-import { agents, api, daemon, loadOlder, timeline, type PaseoAgent } from "./paseo"
+import { agents, api, daemon, findModel, loadOlder, timeline, type PaseoAgent } from "./paseo"
 import { current, draft, navigate, notify, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
 
@@ -36,11 +36,13 @@ export async function cycleAgent(agent: PaseoAgent) {
 
 /** New session from the draft (provider/model/effort/agent; fork context or worktree if set). */
 export async function createSession(text: string, images?: Images, messageId?: string) {
-  const { provider, thinking, fork, worktree } = draft()
+  const { provider, fork, worktree } = draft()
   const modes = agentConfig(provider, draft().agent ?? "build")
   const models = draft().model ? [] : ((await api.providers.listModels(provider)).models ?? [])
   const model = draft().model ?? (models.find((m) => m.isDefault) ?? models[0])?.id
   if (!model) throw new Error(`No ${provider} models available on the daemon`)
+  // Send the variant the prompt shows: without one the daemon leaves effort unset (provider default), not its catalog default.
+  const thinking = draft().thinking ?? (models.find((m) => m.id === model) ?? findModel(provider, model))?.defaultThinkingOptionId ?? undefined
   const cwd = fork?.cwd ?? process.cwd()
   const attachments = fork ? [fork.attachment] : undefined
   let id: string
