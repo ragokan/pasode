@@ -73,6 +73,37 @@ test("prompt renders its footer and owns autocomplete before host shortcuts", as
   expect(prompt).toBeUndefined()
 })
 
+test("slash completion works mid-text: skills replace just their token, local commands drop theirs", async () => {
+  let prompt: PromptRef | undefined
+  let themes = 0
+  const screen = await testRender(() => <Prompt {...display} focused cwd={process.cwd()}
+    slashItems={[{ name: "themes", description: "Switch theme", run: () => themes++ }, { name: "check", description: "Review skill" }]}
+    ref={(api) => prompt = api} onSubmit={() => {}} />, { width: 80, height: 24, kittyKeyboard: true })
+  try {
+    await screen.mockInput.typeText("please use /ch")
+    await screen.flush()
+    expect(screen.captureCharFrame()).toContain("/check")
+    screen.mockInput.pressTab()
+    await screen.flush()
+    expect(prompt?.text()).toBe("please use /check ")
+    await screen.mockInput.typeText("on this")
+    expect(prompt?.text()).toBe("please use /check on this")
+
+    prompt?.setText("fix it /th")
+    await screen.flush()
+    screen.mockInput.pressEnter()
+    await screen.flush()
+    expect(themes).toBe(1)
+    expect(prompt?.text()).toBe("fix it ")
+
+    prompt?.setText("see src/th")
+    await screen.flush()
+    expect(screen.captureCharFrame()).not.toContain("/themes")
+  } finally {
+    screen.renderer.destroy()
+  }
+})
+
 test("prompt inserts modified-enter newlines", async () => {
   let prompt: PromptRef | undefined
   const submissions: PromptSubmit[] = []

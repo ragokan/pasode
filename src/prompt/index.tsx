@@ -2,6 +2,7 @@ import { decodePasteBytes, TextAttributes, type KeyEvent, type TextareaRenderabl
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
 import { truncate } from "../dialog"
+import { offsetWidth, slashTrigger } from "./slash"
 import { SplitBorder } from "../session"
 import { theme } from "../theme"
 import { readClipboard } from "./clipboard"
@@ -65,11 +66,11 @@ export function Prompt(props: PromptProps) {
     setError(undefined)
   }
 
-  const slashQuery = createMemo(() => prefix() === text() ? text().match(/^\/(\S*)$/)?.[1]?.toLowerCase() : undefined)
+  const slash = createMemo(() => slashTrigger(prefix()))
   const completionKey = () => `${text()}:${prefix().length}`
   const options = createMemo<SlashItem[]>(() => {
     if (!props.focused || dismissed() === completionKey()) return []
-    const query = slashQuery()
+    const query = slash()?.query.toLowerCase()
     return query === undefined ? [] : props.slashItems.filter((item) => item.name.toLowerCase().startsWith(query)).slice(0, 8)
   })
   createEffect(on(() => `${completionKey()}:${props.cwd}`, () => setSelected(0)))
@@ -77,9 +78,14 @@ export function Prompt(props: PromptProps) {
     if (selected() >= options().length) setSelected(0)
   })
 
+  // Replaces only the "/query" token, so commands and skills work mid-sentence; local actions just drop their token.
   function pick(item: SlashItem | undefined) {
-    if (!item || !props.focused) return
-    setText(item.run ? "" : `/${item.name} `)
+    const trigger = slash()
+    if (!item || !trigger || !props.focused || !input) return
+    const before = prefix().slice(0, trigger.index) + (item.run ? "" : `/${item.name} `)
+    input.setText(before + input.plainText.slice(prefix().length))
+    input.cursorOffset = offsetWidth(before)
+    sync()
     item.run?.()
   }
 

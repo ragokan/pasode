@@ -59,6 +59,7 @@ export function App(props: { initialAgentId?: string }) {
   })
 
   const permission = createMemo(() => current()?.pendingPermissions?.[0])
+  const cwd = () => current()?.cwd ?? draft().cwd ?? process.cwd()
   const running = () => current()?.status === "running"
   useSubagentPolling(running)
   useTerminalPolling()
@@ -571,20 +572,24 @@ export function App(props: { initialAgentId?: string }) {
     api.agents.ref(agent.id).respondToPermission({ requestId: request.id, response }).catch(showError)
   }
 
-  // Provider slash commands and skills for the "/" menu, fetched once per session.
-  const [agentCommands] = createResource(agentId, (id) =>
-    api.agents
-      .ref(id)
-      .commands()
-      .then(({ commands }) => commands.map((command) => ({ name: command.name.replace(/^\//, ""), description: command.description })))
-      .catch(() => []),
+  // Provider slash commands and skills for the "/" menu: the session's own, or (home) what a session from the
+  // draft would load. Paseo needs the model for a draft, so wait for the catalog default when none is picked.
+  const [agentCommands] = createResource(
+    () => agentId() ?? (findModel(draft().provider, draft().model) ? `${draft().provider}/${findModel(draft().provider, draft().model)!.id}@${cwd()}` : undefined),
+    (key) => {
+      const [model, dir] = [findModel(draft().provider, draft().model)?.id, cwd()]
+      const request = agentId() === key ? api.agents.ref(key).commands() : daemon.listCommands({ agentId: "", draftConfig: { provider: draft().provider, cwd: dir, model } })
+      return request
+        .then(({ commands }) => commands.map((command) => ({ name: command.name.replace(/^\//, ""), description: command.description })))
+        .catch(() => [])
+    },
   )
   const slashItems = createMemo(() => {
     const local = commands()
       .filter((command) => command.slash && isEnabled(command))
       .map((command) => ({ name: command.slash!, description: command.title, run: () => command.run() }))
     // Ours win on name clashes (e.g. /compact), so each name is listed once.
-    const remote = agentId() ? (agentCommands() ?? []).filter((command) => !local.some((item) => item.name === command.name)) : []
+    const remote = (agentCommands.latest ?? []).filter((command) => !local.some((item) => item.name === command.name))
     return [...local, ...remote]
   })
 
@@ -629,7 +634,6 @@ export function App(props: { initialAgentId?: string }) {
     const variant = agent ? (agent.thinkingOptionId ?? agent.effectiveThinkingOptionId) : (draft().thinking ?? findModel(provider, id)?.defaultThinkingOptionId)
     return { name: modelLabel(provider, id), provider: providerName(provider), variant: variant ?? undefined }
   }
-  const cwd = () => current()?.cwd ?? draft().cwd ?? process.cwd()
   const [branch] = createResource(cwd, async (dir) => {
     try {
       const child = Bun.spawn(["git", "branch", "--show-current"], { cwd: dir, stdout: "pipe", stderr: "ignore" })
