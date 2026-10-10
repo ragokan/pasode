@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { createSignal } from "solid-js"
 import { dialogs } from "./dialog"
-import { agents, api, daemon, findModel, loadOlder, timeline, type PaseoAgent } from "./paseo"
+import { agents, api, daemon, findModel, loadOlder, ownWorkspace, sessionTitle, timeline, type PaseoAgent } from "./paseo"
 import { current, draft, navigate, notify, prefs, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
 
@@ -114,20 +114,22 @@ export async function exportTranscript() {
   try {
     while (timeline.hasOlder && (await loadOlder()));
     const target = path.resolve(agent.cwd, file)
-    await writeFile(target, transcriptMarkdown(agent, timeline.rows))
+    await writeFile(target, transcriptMarkdown({ ...agent, title: sessionTitle(agent) }, timeline.rows))
     notify(`Exported to ${target}`, "success")
   } catch (error) {
     showError(error)
   }
 }
 
-/** OpenCode's session rename → Paseo's updateAgent({ name }) (the daemon's title, shown everywhere). */
+/** OpenCode's session rename → Paseo's updateAgent({ name }), plus the workspace title a lone session shows. */
 export async function rename(id = current()?.id) {
   const agent = id ? agents[id] : undefined
   if (!agent) return
-  const name = await dialogs.prompt({ title: "Rename session", value: agent.title ?? "" })
+  const name = await dialogs.prompt({ title: "Rename session", value: sessionTitle(agent) ?? "" })
   if (!name?.trim()) return
-  await daemon.updateAgent(agent.id, { name: name.trim() }).then(() => notify("Renamed", "success"), showError)
+  const workspace = ownWorkspace(agent)
+  await Promise.all([daemon.updateAgent(agent.id, { name: name.trim() }), workspace && daemon.setWorkspaceTitle(workspace, name.trim())])
+    .then(() => notify("Renamed", "success"), showError)
 }
 
 /** Paseo has no compact RPC: Claude gets `/compact` as a command, Codex maps it to thread/compact/start. */
@@ -184,10 +186,10 @@ export async function fork() {
     model: agent.model ?? undefined,
     label: agent.model ?? undefined,
     thinking: agent.thinkingOptionId ?? undefined,
-    fork: { title: agent.title || "Untitled", cwd: agent.cwd, attachment: context.attachment },
+    fork: { title: sessionTitle(agent) || "Untitled", cwd: agent.cwd, attachment: context.attachment },
   })
   navigate(undefined)
-  notify(`Forking "${agent.title || "Untitled"}" — your next message starts the new session`)
+  notify(`Forking "${sessionTitle(agent) || "Untitled"}" — your next message starts the new session`)
 }
 
 /** Paseo deep link (paseo://h/<server>/agent/<id>) — opens the session in the Paseo apps you're signed into. */

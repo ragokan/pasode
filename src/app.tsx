@@ -15,7 +15,7 @@ import { footerLayout, liveLabel, usageItems } from "./footer"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
-import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, setMcpRevision, timeline, type PaseoAgent } from "./paseo"
+import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript } from "./session"
@@ -221,7 +221,7 @@ export function App(props: { initialAgentId?: string }) {
         .toSorted((a, b) => Number(active(b)) - Number(active(a)) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
         .map(
           (agent): SelectOption<string> => ({
-            title: confirm() === agent.id ? "Press ctrl+d again to archive" : agent.title || "Untitled",
+            title: confirm() === agent.id ? "Press ctrl+d again to archive" : sessionTitle(agent) || "Untitled",
             bg: confirm() === agent.id ? theme.error : undefined,
             value: agent.id,
             category: active(agent) ? "Running" : dayCategory(agent.updatedAt),
@@ -838,7 +838,7 @@ export function App(props: { initialAgentId?: string }) {
                   <box border={["left"]} borderColor={theme.secondary} customBorderChars={SplitBorder} flexShrink={0}>
                     <box paddingLeft={2} paddingTop={1} paddingBottom={1} backgroundColor={theme.backgroundPanel}>
                       <text fg={theme.textMuted}>
-                        <span style={{ fg: theme.text }}>↳ {view().title}</span> · read-only subagent of {current()?.title || "this session"} · {label("session.parent")} back
+                        <span style={{ fg: theme.text }}>↳ {view().title}</span> · read-only subagent of {(current() && sessionTitle(current()!)) || "this session"} · {label("session.parent")} back
                       </text>
                     </box>
                   </box>

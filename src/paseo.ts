@@ -1,4 +1,4 @@
-import { createPaseoApi, type PaseoAgent, type PaseoAgentStream, type PaseoProviderUsageResult } from "@getpaseo/client"
+import { createPaseoApi, type PaseoAgent, type PaseoAgentStream, type PaseoProviderUsageResult, type PaseoWorkspace } from "@getpaseo/client"
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client"
 import { readFileSync } from "node:fs"
 import os from "node:os"
@@ -34,6 +34,7 @@ export const api = createPaseoApi(daemon)
 export async function connect() {
   await daemon.connect()
   void loadCatalog()
+  void watchWorkspaces().catch(() => {})
   const list = await api.agents.list({ filter: { includeArchived: false }, page: { limit: 200 }, subscribe: {} })
   setAgents(reconcile(Object.fromEntries(list.entries.map(({ agent }) => [agent.id, agent]))))
   list.subscription.subscribe({
@@ -57,6 +58,37 @@ export async function disconnect() {
 
 /** Every non-archived Paseo agent, live. */
 export const [agents, setAgents] = createStore<Record<string, PaseoAgent>>({})
+
+/** Workspace id → title, live. */
+export const [workspaceTitles, setWorkspaceTitles] = createStore<Record<string, string | null>>({})
+
+async function watchWorkspaces() {
+  const titles = (entries: PaseoWorkspace[]) => reconcile(Object.fromEntries(entries.map((workspace) => [workspace.id, workspace.title ?? null])))
+  const list = await api.workspaces.list({ page: { limit: 200 }, subscribe: {} })
+  setWorkspaceTitles(titles(list.entries))
+  list.subscription.subscribe({
+    snapshot: ({ entries }) => setWorkspaceTitles(titles(entries)),
+    update(message) {
+      if (message.type !== "workspace_update") return
+      const update = message.payload
+      if (update.kind === "upsert") setWorkspaceTitles(update.workspace.id, update.workspace.title ?? null)
+      else setWorkspaceTitles(produce((all) => delete all[update.id]))
+    },
+  })
+}
+
+/** The agent's own workspace, if no other live agent shares it. */
+export const ownWorkspace = (agent: PaseoAgent) =>
+  agent.workspaceId && Object.values(agents).every((other) => other.id === agent.id || other.workspaceId !== agent.workspaceId) ? agent.workspaceId : undefined
+
+/**
+ * Paseo auto-names the session's workspace after the first message (the agent keeps the prompt's first line), so a
+ * session alone in its workspace shows the workspace title, like the Paseo app; shared workspaces keep agent titles.
+ */
+export const sessionTitle = (agent: PaseoAgent) => {
+  const workspace = ownWorkspace(agent)
+  return (workspace && workspaceTitles[workspace]) || agent.title
+}
 
 type Cursor = NonNullable<Awaited<ReturnType<ReturnType<typeof api.agents.ref>["timeline"]["refetch"]>>["startCursor"]>
 

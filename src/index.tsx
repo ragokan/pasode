@@ -1,7 +1,7 @@
 import { render } from "@opentui/solid"
 import { App } from "./app"
 import { sessionEpilogue } from "./logo"
-import { agents, connect, disconnect } from "./paseo"
+import { agents, connect, disconnect, sessionTitle } from "./paseo"
 import { rendererOptions } from "./renderer"
 import { agentId } from "./state"
 
@@ -31,7 +31,7 @@ await render(() => <App initialAgentId={arg} />, {
   ...rendererOptions,
   onDestroy: () => {
     const id = agentId()
-    if (id) process.stdout.write(sessionEpilogue({ title: agents[id]?.title || "Untitled", id }) + "\n")
+    if (id) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")
     void disconnect().finally(() => process.exit(0))
   },
 })

@@ -1,6 +1,6 @@
 import { TextAttributes } from "@opentui/core"
 import { Slot } from "./plugin"
-import type { PaseoAgent } from "./paseo"
+import { sessionTitle, type PaseoAgent } from "./paseo"
 import { prefs } from "./state"
 import { theme } from "./theme"
 
@@ -12,7 +12,7 @@ export function Sidebar(props: { agent: PaseoAgent }) {
         <box flexShrink={0} gap={1} paddingRight={1}>
           <Slot name="sidebar_title" single agent={props.agent}>
             <text fg={theme.text} attributes={TextAttributes.BOLD}>
-              {props.agent.title || "Untitled"}
+              {sessionTitle(props.agent) || "Untitled"}
             </text>
           </Slot>
           <Slot name="sidebar_content" agent={props.agent} />
