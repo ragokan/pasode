@@ -3,6 +3,12 @@ import type { PaseoProviderUsageResult } from "@getpaseo/client"
 
 type ProviderUsage = PaseoProviderUsageResult["providers"][number]
 
+/** The part of ZeroSub's `zerosub.state` reply (Paseo plugin @kapybara/zerosub) this plugin reads. */
+export type ZeroSubState = {
+  accounts: { id: string; family: string; label: string; usage: { windows: { id: string; label: string; usedPercent: number; resetsAt: string | null }[] } | null }[]
+  agents: { agentId: string; accountId: string }[]
+}
+
 export function formatReset(ms: number) {
   const minutes = Math.max(0, Math.floor(ms / 60_000))
   return minutes >= 1440
@@ -11,8 +17,23 @@ export function formatReset(ms: number) {
 }
 
 export function usageWindows(provider: ProviderUsage | undefined, now = Date.now()) {
-  if (provider?.status !== "available") return []
-  return provider.windows.flatMap((window) => {
+  return provider?.status === "available" ? formatWindows(provider.windows, now) : []
+}
+
+/** ZeroSub accounts with the same window format; `current` is the account the agent runs on. */
+export function zeroSubAccounts(state: ZeroSubState, agentId: string | undefined, now = Date.now()) {
+  const using = state.agents.find((route) => route.agentId === agentId)?.accountId
+  return state.accounts.map((account) => ({
+    id: account.id,
+    family: account.family,
+    label: account.label,
+    current: account.id === using,
+    windows: formatWindows((account.usage?.windows ?? []).map((window) => ({ ...window, usedPct: window.usedPercent })), now),
+  }))
+}
+
+function formatWindows(windows: ProviderUsage["windows"], now: number) {
+  return windows.flatMap((window) => {
     if (/\bfable\b/i.test(window.label)) return []
     const used = window.usedPct ?? (window.remainingPct == null ? undefined : 100 - window.remainingPct)
     if (used === undefined || !Number.isFinite(used)) return []

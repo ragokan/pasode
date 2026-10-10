@@ -1,7 +1,7 @@
 // Provenance: ~/coding/ocode/plugins/usage-sidebar/usage.test.ts formatting cases; Paseo fixtures authored for pasode.
 import { expect, test } from "bun:test"
 import type { PaseoProviderUsageResult } from "@getpaseo/client"
-import { formatReset, usageWindows } from "./usage"
+import { formatReset, usageWindows, zeroSubAccounts, type ZeroSubState } from "./usage"
 
 const now = Date.UTC(2026, 9, 9)
 const provider = (windows: PaseoProviderUsageResult["providers"][number]["windows"]): PaseoProviderUsageResult["providers"][number] => ({
@@ -40,4 +40,26 @@ test("missing resets keep labels; expired readings are explicitly inferred", () 
     { countdown: "0h0m", percent: "~0%" },
     { countdown: "5h", percent: "0%" },
   ])
+})
+
+test("ZeroSub accounts reuse the window format and mark the account the session runs on", () => {
+  const state: ZeroSubState = {
+    accounts: [
+      { id: "claude-main", family: "claude", label: "development", usage: { windows: [
+        { id: "five_hour", label: "5-hour", usedPercent: 22.4, resetsAt: new Date(now + (2 * 60 + 13) * 60_000).toISOString() },
+        { id: "seven_day_fable", label: "Weekly · Fable", usedPercent: 0, resetsAt: null },
+      ] } },
+      { id: "claude-2", family: "claude", label: "okan", usage: null },
+      { id: "codex-main", family: "codex", label: "okan", usage: { windows: [
+        { id: "primary", label: "Weekly", usedPercent: 40, resetsAt: new Date(now + (3 * 24 + 22) * 3_600_000).toISOString() },
+      ] } },
+    ],
+    agents: [{ agentId: "agent-1", accountId: "claude-main" }],
+  }
+  expect(zeroSubAccounts(state, "agent-1", now)).toEqual([
+    { id: "claude-main", family: "claude", label: "development", current: true, windows: [{ countdown: "2h13m", percent: "22%" }] },
+    { id: "claude-2", family: "claude", label: "okan", current: false, windows: [] },
+    { id: "codex-main", family: "codex", label: "okan", current: false, windows: [{ countdown: "3d22h", percent: "40%" }] },
+  ])
+  expect(zeroSubAccounts(state, undefined, now).some((account) => account.current)).toBe(false)
 })
