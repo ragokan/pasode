@@ -1,6 +1,6 @@
 // Plugin host, shaped after OpenCode's TUI plugins: `export default { id, setup(ctx) }`,
 // with ctx.ui.slot(...) for sidebar/home sections, ctx.commands.register(...), dialogs and toasts.
-// Plugins live outside this repo (e.g. ~/coding/pascode) and are listed in ~/.config/pascode/cli.json.
+// Plugins are listed in ~/.config/pasode/cli.json; this repo's own live in okan-plugins/.
 import type { CliRenderer } from "@opentui/core"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
@@ -38,7 +38,7 @@ export function Slot(props: SlotProps & { name: SlotName; single?: boolean; chil
   )
 }
 
-export type PascodeContext = {
+export type PasodeContext = {
   id: string
   options: Record<string, unknown>
   /** Paseo client, live stores and the current-session helpers. */
@@ -59,9 +59,9 @@ export type PascodeContext = {
   mcp: typeof mcp
 }
 
-export type PascodePlugin = { id: string; setup(ctx: PascodeContext): void | Promise<void> }
+export type PasodePlugin = { id: string; setup(ctx: PasodeContext): void | Promise<void> }
 
-function context(plugin: string, options: Record<string, unknown>, renderer: CliRenderer): PascodeContext {
+function context(plugin: string, options: Record<string, unknown>, renderer: CliRenderer): PasodeContext {
   return {
     id: plugin,
     options,
@@ -93,7 +93,7 @@ export function resolveEntry(target: string) {
   const pkg = path.join(target, "package.json")
   if (existsSync(pkg)) {
     const json = JSON.parse(readFileSync(pkg, "utf8"))
-    const entry = json.pascode ?? (typeof json.exports === "string" ? json.exports : json.exports?.["."]) ?? json.module ?? json.main
+    const entry = json.pasode ?? (typeof json.exports === "string" ? json.exports : json.exports?.["."]) ?? json.module ?? json.main
     if (typeof entry === "string") return path.join(target, entry)
   }
   for (const name of ["index.tsx", "index.ts", "tui.tsx", "tui.ts"]) if (existsSync(path.join(target, name))) return path.join(target, name)
@@ -110,7 +110,7 @@ export async function loadPlugins(renderer: CliRenderer) {
       const module = await import(pathToFileURL(resolveEntry(spec.path)).href)
       const exported = module.default ?? module
       // A module may export one plugin or several (like ocode's consolidated entry).
-      for (const plugin of (Array.isArray(exported) ? exported : [exported]) as PascodePlugin[]) {
+      for (const plugin of (Array.isArray(exported) ? exported : [exported]) as PasodePlugin[]) {
         if (typeof plugin?.setup !== "function") throw new Error("default export has no setup(ctx)")
         await runWithOwner(owner, () => createRoot(() => plugin.setup(context(plugin.id ?? spec.spec, spec.options, renderer))))
         setLoadedPlugins((list) => [...list, { id: plugin.id ?? spec.spec, spec: spec.spec }])

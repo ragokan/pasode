@@ -10,7 +10,7 @@ const keys = Object.keys(ristretto) as (keyof typeof ristretto)[]
 const assets = (await readdir(join(import.meta.dir, "assets"), { recursive: true })).filter((name) => name.endsWith(".json"))
 
 describe("built-in themes", () => {
-  test("ships only OpenCode's default theme; the rest come from ~/.config/{opencode,pascode}/themes", () => {
+  test("ships only OpenCode's default theme; the rest come from ~/.config/{opencode,pasode}/themes", () => {
     expect(assets).toEqual(["v2/opencode.json"])
   })
   for (const filename of assets) {
@@ -143,13 +143,13 @@ test("every discovered user theme resolves all keys in both modes", async () => 
   }
 })
 
-test("discovery applies builtin < opencode < pascode precedence, then loads by filename", async () => {
-  const home = await mkdtemp(join(tmpdir(), "pascode-themes-"))
+test("discovery applies builtin < opencode < pasode precedence, then loads by filename", async () => {
+  const home = await mkdtemp(join(tmpdir(), "pasode-themes-"))
   try {
-    for (const source of ["opencode", "pascode"]) {
+    for (const source of ["opencode", "pasode"]) {
       const directory = join(home, ".config", source, "themes")
       await mkdir(directory, { recursive: true })
-      await Bun.write(join(directory, "opencode.json"), JSON.stringify({ base: { hue: { interactive: { "200": source === "pascode" ? "#123456" : "#654321" } } }, dark: {} }))
+      await Bun.write(join(directory, "opencode.json"), JSON.stringify({ base: { hue: { interactive: { "200": source === "pasode" ? "#123456" : "#654321" } } }, dark: {} }))
     }
     await Bun.write(join(home, ".config/opencode/themes/custom.json"), JSON.stringify({ base: { hue: { interactive: { "200": "#abcdef" } } }, dark: {} }))
     const script = `
@@ -163,7 +163,7 @@ test("discovery applies builtin < opencode < pascode precedence, then loads by f
     expect(exit).toBe(0)
     const result = JSON.parse(output)
     expect(result.themes).toHaveLength(2) // the default plus the temp "custom" theme
-    expect(result.themes.find((theme: { name: string }) => theme.name === "opencode").source).toBe("pascode")
+    expect(result.themes.find((theme: { name: string }) => theme.name === "opencode").source).toBe("pasode")
     expect(result.themes.find((theme: { name: string }) => theme.name === "custom").source).toBe("opencode")
     expect(result.primary).toEqual([18, 52, 86, 255])
   } finally {

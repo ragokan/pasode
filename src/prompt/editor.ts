@@ -6,7 +6,7 @@ import path from "node:path"
 
 // Adapted from OpenCode's editor.ts (MIT); always resume, including spawn failures.
 export async function editPrompt(text: string, cwd: string, renderer: CliRenderer): Promise<string> {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pascode-editor-"))
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pasode-editor-"))
   const file = path.join(directory, "prompt.md")
   let suspended = false
   let completed = false
@@ -17,7 +17,7 @@ export async function editPrompt(text: string, cwd: string, renderer: CliRendere
     renderer.currentRenderBuffer.clear()
     await new Promise<void>((resolve, reject) => {
       // The shell handles quoted editor paths/flags; the temp path is passed as $1, not interpolated.
-      const child = spawn(process.env.SHELL || "/bin/sh", ["-c", `${process.env.VISUAL || process.env.EDITOR || "vi"} "$1"`, "pascode-editor", file], { cwd, stdio: "inherit" })
+      const child = spawn(process.env.SHELL || "/bin/sh", ["-c", `${process.env.VISUAL || process.env.EDITOR || "vi"} "$1"`, "pasode-editor", file], { cwd, stdio: "inherit" })
       child.on("error", (error) => reject(new Error(`${error.message}; draft saved at ${file}`, { cause: error })))
       child.on("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Editor exited with ${signal || code}; draft saved at ${file}`)))
     })

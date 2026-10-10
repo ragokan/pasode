@@ -35,7 +35,7 @@ export async function readClipboard(pastedText?: string, cwd = process.cwd()): P
     return { text: pastedText }
   }
   if (process.platform !== "darwin") return { text: pastedText ?? "" }
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pascode-clipboard-"))
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pasode-clipboard-"))
   const file = path.join(directory, "image.png")
   try {
     await exec("osascript", [

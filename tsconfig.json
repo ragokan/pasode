@@ -9,6 +9,8 @@
     "jsxImportSource": "@opentui/solid",
     "allowJs": true,
     "types": ["bun"],
+    // Type-only host API for plugins (okan-plugins/).
+    "paths": { "@pasode/host": ["./src/plugin.tsx"] },
 
     // Bundler mode
     "moduleResolution": "bundler",

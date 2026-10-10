@@ -7,7 +7,7 @@ import type { ThemeColors } from "../theme"
 import { tint } from "./color"
 
 type Mode = "dark" | "light"
-type ThemeSource = "builtin" | "opencode" | "pascode"
+type ThemeSource = "builtin" | "opencode" | "pasode"
 type ThemeEntry = { name: string; source: ThemeSource; path: string }
 
 async function discoverThemes(): Promise<ThemeEntry[]> {
@@ -15,7 +15,7 @@ async function discoverThemes(): Promise<ThemeEntry[]> {
   const directories: [ThemeSource, string][] = [
     ["builtin", join(import.meta.dir, "assets/v2")],
     ["opencode", join(homedir(), ".config/opencode/themes")],
-    ["pascode", join(homedir(), ".config/pascode/themes")],
+    ["pasode", join(homedir(), ".config/pasode/themes")],
   ]
   for (const [source, directory] of directories) {
     const files = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {

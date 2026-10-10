@@ -4,7 +4,7 @@ import { sessionTitle, type PaseoAgent } from "./paseo"
 import { prefs } from "./state"
 import { theme } from "./theme"
 
-// Same frame as OpenCode's routes/session/sidebar.tsx; sections come from plugins (~/coding/pascode).
+// Same frame as OpenCode's routes/session/sidebar.tsx; sections come from plugins (okan-plugins/).
 export function Sidebar(props: { agent: PaseoAgent }) {
   return (
     <box width={prefs.sidebarWidth} flexShrink={0} height="100%" paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2} backgroundColor={theme.backgroundPanel}>

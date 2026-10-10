@@ -256,7 +256,7 @@ test("running footer switches interrupt status and restores location", async () 
 })
 
 test("image file paste previews native attachments and preserves exact text on submission", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pascode-prompt-images-test-"))
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pasode-prompt-images-test-"))
   const file = path.join(directory, "test image.png")
   await writeFile(file, Buffer.from(image.data, "base64"))
   let prompt: PromptRef | undefined

@@ -1,0 +1,23 @@
+# Sources (2026-10-09)
+
+<!-- Provenance: ~/coding/ocode/SOURCES.md format; source inventory authored for pasode. -->
+
+Adaptations retain a provenance comment in every TypeScript source/test. No source repository or live config was modified.
+
+| Maintained files | Source / changes |
+| --- | --- |
+| `{index.ts,runtime.test.ts}` | `~/coding/ocode/plugins/ocode/tui.ts` and `setup.ts`; export the components as an array supported by the Paseo loader, rather than duplicating host lifecycle handling. Runtime/effect/slot cleanup regression check authored locally. |
+| `sidebar-context/{tui.tsx,context.ts,context.test.ts}` | OpenCode `packages/tui/src/feature-plugins/sidebar/context.tsx` (MIT); use Paseo `AgentUsage`, correct provider cache accounting, no fabricated readings. Pure checks authored locally. |
+| `sidebar-mcp/tui.tsx` | OpenCode `packages/tui/src/feature-plugins/sidebar/mcp.tsx` (MIT); provider-config Enabled/Disabled via `ctx.mcp`, no server status claims. |
+| `sidebar-todo/tui.tsx` | OpenCode `packages/tui/src/feature-plugins/sidebar/todo.tsx` (MIT); latest Paseo todo row and native task states. |
+| `sidebar-files/{tui.tsx,files.ts,files.test.ts}` | OpenCode `packages/tui/src/feature-plugins/sidebar/files.tsx` (MIT); cwd-relative aggregation/diff parser and tests authored locally for Paseo edit/write rows. |
+| `sidebar-footer/tui.tsx` | OpenCode `packages/tui/src/feature-plugins/sidebar/footer.tsx` and `routes/session/sidebar.tsx` (MIT); single-winner daemon version/connection footer, no getting-started promotion. |
+| `usage-sidebar/{tui.tsx,usage.ts,usage.test.ts}` | `~/coding/ocode/plugins/usage-sidebar/{README.md,tui.ts,usage.ts,usage.test.ts}`; retain layout/countdown/expired-window conventions, replace credential readers/cache with Paseo usage signals. |
+| `token-metrics/{metrics.ts,metrics.test.ts,tui.tsx}` | `~/coding/paseo-cli-app/src/{metrics.ts,metrics.test.ts}` (original comments credit `opencode-sidebar-token-metrics`); preserve compute/cache/delay logic and fixtures. Countdown belongs to usage-sidebar; plugin UI authored locally. |
+| `warp/{tui.tsx,payload.ts,transitions.ts,warp.test.ts}` | `~/coding/ocode/plugins/warp/src/{tui.ts,v2.ts,notify.ts,payload.ts,title.ts,constants.ts}` and `tests/*` (Warp MIT); same OSC payload transport, title sanitization and handshake semantics, Paseo agent transitions and the notification-routing check authored locally. `.tsx` routes Solid hooks through OpenTUI's host-runtime transform even without JSX. |
+| `LICENSE` | Combined unchanged MIT permission/warranty text and copyright notices from reference OpenCode `LICENSE` and `~/coding/ocode/plugins/warp/LICENSE`. |
+| `AGENTS.md`, `README.md`, `SOURCES.md` | `~/coding/ocode` repository conventions adapted for this plugin folder. |
+
+Reference OpenCode checkout: `~/.cache/paseo-tui-ref/opencode`, HEAD `388406238bd5ca15564a762840a2362c3a45bd9c`, upstream https://github.com/anomalyco/opencode. The sidebar feature plugin sources above are MIT. Reference ocode HEAD: `fd7c24241338ad08e8e66b4c01e7014a10a8f8d6`; source checkout https://github.com/ragokan/ocode. Warp fork provenance: https://github.com/ragokan/opencode-warp, upstream https://github.com/warpdotdev/opencode-warp, original source HEAD `65a41f544af0934641b61a6642083402c3774cc1` plus preserved local modifications (see ocode's `SOURCES.md`).
+
+Observed environment: Bun 1.4.2, OpenTUI 0.5.17, Solid 1.9.12, Paseo client/protocol 0.11.2. Plugin runtime access remains through `ctx`, and `@pasode/host` imports are erased types only.

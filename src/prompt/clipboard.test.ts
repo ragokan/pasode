@@ -5,7 +5,7 @@ import path from "node:path"
 import { readClipboard } from "./clipboard"
 
 test("pasted image paths preserve MIME and base64 across supported extensions", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pascode-attachment-test-"))
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pasode-attachment-test-"))
   try {
     for (const [extension, mimeType] of [["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"]] as const) {
       await writeFile(path.join(directory, `image.${extension}`), "bytes")
@@ -23,7 +23,7 @@ test("non-attachments and invalid file URLs remain literal pasted text", async (
 })
 
 test("local image reads reject files larger than OpenCode's 20 MB bound", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "pascode-attachment-limit-test-"))
+  const directory = await mkdtemp(path.join(os.tmpdir(), "pasode-attachment-limit-test-"))
   const file = path.join(directory, "large.png")
   try {
     await writeFile(file, "")

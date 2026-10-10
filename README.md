@@ -4,7 +4,7 @@ OpenCode-style terminal client for a running [Paseo](https://paseo.sh) daemon. S
 steer here are the same ones the Paseo desktop and mobile apps show, live. Claude and Codex only.
 
 Built on OpenTUI + Solid (OpenCode's UI stack) and `@getpaseo/client`; much of the UI is ported from
-OpenCode (MIT). Plugins live in [`~/coding/pascode`](../pascode).
+OpenCode (MIT). Plugins live in [`okan-plugins/`](okan-plugins).
 
 ```sh
 bun install
@@ -15,26 +15,26 @@ bun bin/paseo-tui.ts -s 1c9a5b6 # open a session (full ID or `paseo ls` prefix; 
 On your PATH: `chmod +x bin/paseo-tui.ts && ln -s "$PWD/bin/paseo-tui.ts" ~/.local/bin/paseo-tui`.
 
 Connects to `daemon.listen` from `~/.paseo/config.json` (`127.0.0.1:6767`). Env: `PASEO_URL`
-(e.g. `ws://host:6767/ws`), `PASEO_PASSWORD`, `PASEO_HOME`, `PASCODE_CONFIG_DIR`.
+(e.g. `ws://host:6767/ws`), `PASEO_PASSWORD`, `PASEO_HOME`, `PASODE_CONFIG_DIR`.
 
 Everything is live: sessions started from the Paseo app or your phone show up under **Running** in
 `ctrl+x l`; open one to attach to its stream.
 
-## Config: `~/.config/pascode/cli.json` (JSONC)
+## Config: `~/.config/pasode/cli.json` (JSONC)
 
 Same shape as OpenCode's `cli.json` where it overlaps:
 
 ```jsonc
 {
-  "theme": { "name": "monokai-pro-ristretto", "mode": "dark" }, // OpenCode's default + ~/.config/{opencode,pascode}/themes
+  "theme": { "name": "monokai-pro-ristretto", "mode": "dark" }, // OpenCode's default + ~/.config/{opencode,pasode}/themes
   "leader": "ctrl+x",
   "keybinds": { "agent.cycle": "shift+tab", "session.sidebar.toggle": "ctrl+b" }, // ids: ctrl+x h; "none" disables
   "session": { "sidebar": "auto", "sidebarWidth": 30, "thinking": "show", "verbosity": "medium", "permissions": "bypass" },
-  "plugins": ["~/coding/pascode/plugins/pascode"] // or ["path", { options }]
+  "plugins": ["~/coding/paseo-cli-app/okan-plugins"] // or ["path", { options }]
 }
 ```
 
-Runtime choices (theme, toggles, last model) persist in `~/.local/state/pascode/kv.json`. `/settings` is OpenCode's
+Runtime choices (theme, toggles, last model) persist in `~/.local/state/pasode/kv.json`. `/settings` is OpenCode's
 settings dialog (←/→ changes a value) for the ones pasode honors: theme, color mode, sidebar, scrollbar, thinking,
 markdown, tool grouping, verbosity, transcript images, TPS, new session location, permissions, diff layout.
 Quitting from a session prints its title and `pasode -s <id>` to continue, like OpenCode.

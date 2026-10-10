@@ -2,8 +2,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-/** ~/.config/pascode/cli.json — a subset of OpenCode's cli.json shape. JSONC allowed. */
-export type PascodeConfig = {
+/** ~/.config/pasode/cli.json — a subset of OpenCode's cli.json shape. JSONC allowed. */
+export type PasodeConfig = {
   theme?: { name?: string; mode?: "dark" | "light" }
   leader?: string
   keybinds?: Record<string, string>
@@ -31,9 +31,9 @@ export type PascodeConfig = {
 }
 
 const home = os.homedir()
-export const configDir = process.env.PASCODE_CONFIG_DIR ?? path.join(home, ".config", "pascode")
+export const configDir = process.env.PASODE_CONFIG_DIR ?? path.join(home, ".config", "pasode")
 export const configPath = path.join(configDir, "cli.json")
-const statePath = path.join(process.env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), "pascode", "kv.json")
+const statePath = path.join(process.env.XDG_STATE_HOME ?? path.join(home, ".local", "state"), "pasode", "kv.json")
 
 export const expandHome = (value: string) => value.replace(/^~(?=$|\/)/, home)
 
@@ -46,7 +46,7 @@ function readJsonc(file: string): any {
   }
 }
 
-export const config: PascodeConfig = readJsonc(configPath)
+export const config: PasodeConfig = readJsonc(configPath)
 
 export function pluginSpecs() {
   return (config.plugins ?? []).map((entry) => {
