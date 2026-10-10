@@ -1,6 +1,6 @@
 // Provenance: OpenCode MIT packages/tui/src/feature-plugins/sidebar/mcp.tsx.
 import { createResource, createSignal, For, onCleanup, Show } from "solid-js"
-import type { PasodePlugin } from "@pasode/host"
+import type { PasodePlugin } from "../../plugin"
 
 export default {
   id: "sidebar-mcp",

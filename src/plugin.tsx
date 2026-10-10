@@ -103,8 +103,10 @@ export function resolveEntry(target: string) {
 export const [loadedPlugins, setLoadedPlugins] = createStore<{ id: string; spec: string; error?: string }[]>([])
 
 /** Call from inside the app (needs the reactive owner) after ensureRuntimePluginSupport() ran in the launcher. */
-export async function loadPlugins(renderer: CliRenderer) {
+export async function loadPlugins(renderer: CliRenderer, features: PasodePlugin[] = []) {
   const owner = getOwner() as Owner
+  // Built-in features first; /status lists only the plugins from cli.json.
+  for (const feature of features) runWithOwner(owner, () => createRoot(() => feature.setup(context(feature.id, {}, renderer))))
   for (const spec of pluginSpecs()) {
     try {
       const module = await import(pathToFileURL(resolveEntry(spec.path)).href)

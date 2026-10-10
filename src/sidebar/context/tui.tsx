@@ -1,6 +1,6 @@
 // Provenance: OpenCode MIT packages/tui/src/feature-plugins/sidebar/context.tsx.
 import { createMemo, onCleanup } from "solid-js"
-import type { PasodePlugin } from "@pasode/host"
+import type { PasodePlugin } from "../../plugin"
 import { contextUsage } from "./context"
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })

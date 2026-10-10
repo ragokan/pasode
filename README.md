@@ -78,6 +78,29 @@ Closing the list reloads the session (Paseo `refreshAgent`, history kept) so the
 for `/reload`. Claude servers show live health from `claude mcp list` (run with Paseo's `CLAUDE_CONFIG_DIR`);
 Codex servers show their configured state.
 
+## Sidebar
+
+Built-in sections live in `src/sidebar/` and register through the same slot API as plugins (like OpenCode's
+feature plugins), so a plugin's `order` places it between them. The session title stays first. Sections use
+OpenCode-style bold headers, muted values and success/muted bullets; MCP, Todo and Modified Files collapse on header
+click when there are more than two entries.
+
+| Folder | Slot / order | Shows |
+| --- | --- | --- |
+| `context` | `sidebar_content` / 100 | Latest context tokens, percent used and cost from `agent.lastUsage`. Explicit context occupancy wins; fallback token accounting respects Claude/Codex cache semantics. Missing readings are `—`, not invented zeroes. |
+| `mcp` | `sidebar_content` / 200 | Provider-config MCP names, Enabled/Disabled, reread after `mcpRevision` changes. Enabled is **not** a claim that the server is connected. |
+| `todo` | `sidebar_content` / 400 | Latest `todo` timeline item; hidden when all tasks are complete. |
+| `files` | `sidebar_content` / 500 | Completed edit/write calls aggregated by cwd-relative path, with `+added` / `-removed` counts. |
+| `metrics` | `sidebar_content` / 700 | Speed, Cache, TTFT. Speed excludes recorded tool time and needs live turn completion/token events; historical messages can supply TTFT. |
+| `footer` | `sidebar_footer` / 100, single winner | `• Paseo <daemon version> <connection status>`, using daemon server info and connection subscriptions. |
+
+- Modified Files is **timeline activity**, not a Git working-tree diff, over the newest 300 timeline rows. Repeated
+  edits accumulate; unified diff counts are preferred, otherwise edit old/new replacement strings are counted. Writes
+  expose no old content, so removed lines can't be counted. Shell/unknown tools that modify files are not represented.
+- Cost is exactly `lastUsage.totalCostUsd`, not a lifetime session total. Missing daemon version/context limit/cost
+  stays `—`.
+- Speed/TTFT read `timeline.marks` and turn marks; recorded tool durations are summed (parallel tools overlap).
+
 ## Plugins
 
 `export default { id, setup(ctx) }` (or an array), like OpenCode's TUI plugins. `ctx.ui.slot(name, render, order)`

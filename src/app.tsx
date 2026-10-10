@@ -20,7 +20,7 @@ import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript } from "./session"
 import { DialogSettings } from "./settings"
-import { Sidebar } from "./sidebar"
+import { Sidebar, sidebarFeatures } from "./sidebar"
 import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDraft, setPref, showError, subagent, toast } from "./state"
 import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
@@ -42,7 +42,7 @@ export function App(props: { initialAgentId?: string }) {
 
   // Theme from kv/config; the built-in palette stays if it can't load.
   loadTheme(prefs.theme, prefs.themeMode).then(applyTheme, () => {})
-  void loadPlugins(renderer)
+  void loadPlugins(renderer, sidebarFeatures)
 
   // Accept the short ID prefixes `paseo ls` prints.
   const initial = props.initialAgentId

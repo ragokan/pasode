@@ -1,6 +1,6 @@
 // Provenance: OpenCode MIT sidebar/footer.tsx and routes/session/sidebar.tsx single-winner footer.
 import { createSignal, onCleanup } from "solid-js"
-import type { PasodePlugin } from "@pasode/host"
+import type { PasodePlugin } from "../../plugin"
 
 export default {
   id: "sidebar-footer",

@@ -1,6 +1,6 @@
 // Provenance: OpenCode MIT packages/tui/src/feature-plugins/sidebar/files.tsx.
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
-import type { PasodePlugin } from "@pasode/host"
+import type { PasodePlugin } from "../../plugin"
 import { aggregateFiles } from "./files"
 
 export default {

@@ -17,8 +17,8 @@ test("host runtime loads the bundle, binds Solid effects, and disposes slot regi
       const slots = []
       const titles = []
       const stops = []
-      assert.equal(plugins.length, 8)
-      assert.equal(new Set(plugins.map(plugin => plugin.id)).size, 8)
+      assert.equal(plugins.length, 2)
+      assert.equal(new Set(plugins.map(plugin => plugin.id)).size, 2)
       for (const plugin of plugins) {
         assert.equal(typeof plugin.id, "string")
         assert.equal(typeof plugin.setup, "function")
@@ -36,7 +36,7 @@ test("host runtime loads the bundle, binds Solid effects, and disposes slot regi
           })
         })
       }
-      assert.deepEqual(slots.filter(slot => slot.name === "sidebar_content").map(slot => slot.order), [100, 200, 400, 500, 600, 700])
+      assert.deepEqual(slots.filter(slot => slot.name === "sidebar_content").map(slot => slot.order), [600])
       assert.deepEqual(titles, ["• Fixture"])
       for (const stop of stops) stop()
       assert.equal(slots.length, 0)

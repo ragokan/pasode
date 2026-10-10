@@ -92,7 +92,7 @@ export const sessionTitle = (agent: PaseoAgent) => {
 
 type Cursor = NonNullable<Awaited<ReturnType<ReturnType<typeof api.agents.ref>["timeline"]["refetch"]>>["startCursor"]>
 
-/** Timing marks for plugins' Speed/TTFT metrics (pasode token-metrics). */
+/** Timing marks for the sidebar's Speed/TTFT metrics (src/sidebar/metrics). */
 export type Mark =
   | { kind: "item"; type: string; at: number; callId?: string; status?: string }
   | { kind: "turn_started"; at: number }
