@@ -10,7 +10,7 @@ Add the consolidated entry to `~/.config/pasode/cli.json` (preserve other settin
 
 ```json
 {
-  "plugins": ["~/coding/paseo-cli-app/okan-plugins"]
+  "plugins": ["~/coding/pasode/okan-plugins"]
 }
 ```
 
@@ -51,7 +51,7 @@ The session on screen speaks Warp's rich `warp://cli-agent` protocol (session st
 ## Verify
 
 ```sh
-cd ~/coding/paseo-cli-app
+cd ~/coding/pasode
 bun test
 bun run typecheck
 ```

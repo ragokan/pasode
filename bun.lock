@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "paseo-cli-app",
+      "name": "pasode",
       "dependencies": {
         "@getpaseo/client": "0.11.2",
         "@opentui/core": "0.5.17",

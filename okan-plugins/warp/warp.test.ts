@@ -63,7 +63,7 @@ test("rich events speak as opencode inside Warp only", () => {
 })
 
 test("a delayed stop never carries another session's transcript; off-screen sessions stay silent; titles follow sessionTitle", () => {
-  const host = path.resolve(import.meta.dir, "../../../paseo-cli-app")
+  const host = path.resolve(import.meta.dir, "../..")
   const result = Bun.spawnSync({
     cmd: [process.execPath, "-e", `
       // Capture terminal writes before any ESM import of node:fs snapshots writeFileSync.

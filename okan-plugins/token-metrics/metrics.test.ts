@@ -1,4 +1,4 @@
-// Provenance: ~/coding/paseo-cli-app/src/metrics.test.ts; retained regression fixtures.
+// Provenance: ~/coding/pasode/src/metrics.test.ts; retained regression fixtures.
 import { expect, test } from "bun:test"
 import { cacheHit, computeMetrics, formatDelay, type Mark } from "./metrics"
 

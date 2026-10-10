@@ -1,4 +1,4 @@
-// Provenance: ~/coding/paseo-cli-app/src/metrics.ts and OpenCode-style sidebar rows; plugin UI authored for pasode.
+// Provenance: ~/coding/pasode/src/metrics.ts and OpenCode-style sidebar rows; plugin UI authored for pasode.
 import { createMemo, onCleanup } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
 import { cacheHit, computeMetrics, formatDelay } from "./metrics"

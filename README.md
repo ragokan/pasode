@@ -30,7 +30,7 @@ Same shape as OpenCode's `cli.json` where it overlaps:
   "leader": "ctrl+x",
   "keybinds": { "agent.cycle": "shift+tab", "session.sidebar.toggle": "ctrl+b" }, // ids: ctrl+x h; "none" disables
   "session": { "sidebar": "auto", "sidebarWidth": 30, "thinking": "show", "verbosity": "medium", "permissions": "bypass" },
-  "plugins": ["~/coding/paseo-cli-app/okan-plugins"] // or ["path", { options }]
+  "plugins": ["~/coding/pasode/okan-plugins"] // or ["path", { options }]
 }
 ```
 
