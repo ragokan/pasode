@@ -42,6 +42,8 @@ test("host runtime loads the bundle, binds Solid effects, and disposes slot regi
       assert.equal(slots.length, 0)
     `],
     cwd: host,
+    // Kaku would animate the title; this checks the plain one.
+    env: { ...process.env, TERM_PROGRAM: "" },
     stdout: "pipe",
     stderr: "pipe",
   })

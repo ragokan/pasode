@@ -119,6 +119,54 @@ test("a delayed stop never carries another session's transcript; off-screen sess
   expect(result.exitCode).toBe(0)
 }, 15_000)
 
+test("in Kaku: an animated spinner while running, one notification per event for the session on screen", () => {
+  const host = path.resolve(import.meta.dir, "../..")
+  const result = Bun.spawnSync({
+    cmd: [process.execPath, "-e", `
+      const assert = (await import("node:assert/strict")).default
+      await import(Bun.resolveSync("@opentui/solid/preload", process.cwd()))
+      const { ensureRuntimePluginSupport } = await import(Bun.resolveSync("@opentui/solid/runtime-plugin-support/configure", process.cwd()))
+      ensureRuntimePluginSupport()
+      const intervals = []
+      globalThis.setInterval = (fn, ms) => intervals.push({ fn, ms, live: true })
+      globalThis.clearInterval = (id) => { if (intervals[id - 1]) intervals[id - 1].live = false }
+      const { default: plugin } = await import(${JSON.stringify(path.join(import.meta.dir, "tui.tsx"))})
+      const { createRoot, createSignal } = await import("opentui:runtime-module:solid-js")
+      const agent = (id, status, extra = {}) => ({ id, cwd: "/p", title: id, status, pendingPermissions: [], ...extra })
+      const [agents, setAgents] = createSignal({ a: agent("a", "running"), b: agent("b", "running") })
+      const titles = []
+      const notes = []
+      createRoot(() => plugin.setup({
+        options: {},
+        renderer: { setTerminalTitle: (title) => titles.push(title), triggerNotification: (message, title) => notes.push([title, message]) },
+        paseo: {
+          current: () => agents().a, agentId: () => "a", sessionTitle: (agent) => agent.title,
+          get agents() { return agents() }, get timeline() { return { agentId: "a", rows: [{ type: "assistant_message", text: "All done.\\n\\nSee diff" }] } },
+        },
+      }))
+      assert.equal(titles.at(-1), "⠲ a")
+      const live = intervals.filter((timer) => timer.live)
+      assert.deepEqual(live.map((timer) => timer.ms), [250])
+      live[0].fn()
+      assert.equal(titles.at(-1), "⠰ a")
+      setAgents({ ...agents(), a: agent("a", "running", { pendingPermissions: [{ name: "Edit", input: {} }] }) })
+      setAgents({ ...agents(), a: agent("a", "running") })
+      const finished = { requiresAttention: true, attentionReason: "finished", attentionTimestamp: "t1" }
+      setAgents({ ...agents(), a: agent("a", "idle", finished) })
+      setAgents({ ...agents(), b: agent("b", "idle", finished) })
+      assert.deepEqual(notes, [["🟡 a", "Needs your input"], ["✓ a", "All done. See diff"]])
+      assert.equal(titles.at(-1), "✓ a")
+      assert.equal(intervals.filter((timer) => timer.live).length, 0)
+    `],
+    cwd: host,
+    env: { ...process.env, TERM_PROGRAM: "Kaku", WARP_CLI_AGENT_PROTOCOL_VERSION: "" },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  expect(result.stderr.toString()).toBe("")
+  expect(result.exitCode).toBe(0)
+}, 15_000)
+
 test("titles remove controls and keep ocode's 40-character label limit", () => {
   expect(formatTitle("hello\x1b\x07\x9cworld", "• ")).toBe("• hello   world")
   expect(formatTitle("x".repeat(41), "🟡 ")).toBe("🟡 " + "x".repeat(37) + "…")

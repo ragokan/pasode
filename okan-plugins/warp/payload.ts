@@ -1,4 +1,4 @@
-// Provenance: ~/coding/ocode/plugins/warp/src/{payload,notify,title,constants}.ts (Warp MIT).
+// Provenance: ~/coding/ocode/plugins/warp/src/{payload,notify,title,constants}.ts (Warp MIT); Kaku spinner from title.ts.
 import path from "node:path"
 
 export const PLUGIN_VERSION = "0.1.8"
@@ -12,6 +12,11 @@ export function formatTitle(title: string | null | undefined, indicator = "") {
 
 type Env = Readonly<Record<string, string | undefined>>
 export const inWarp = (env: Env) => ["warpterminal", "warp"].includes(env.TERM_PROGRAM?.toLowerCase() ?? "")
+export const inKaku = (env: Env) => env.TERM_PROGRAM === "Kaku"
+
+// ocode's Kaku title spinner: a clockwise snake in braille rows 2-3. Each title change costs Kaku CPU, so 250 ms.
+export const SPINNER = "⠲⠰⠴⠤⠦⠆⠖⠒"
+export const SPINNER_MS = 250
 
 /**
  * Warp's rich CLI-agent protocol. Warp only accepts it for a pane it tracks as a known agent, so paseo-tui

@@ -1,9 +1,9 @@
 // Provenance: ~/coding/ocode/plugins/warp/src/{tui,v2,notify,title}.ts (Warp MIT).
 // .tsx makes OpenTUI's Solid transform bind these hooks to the host runtime too.
 import { writeFileSync } from "node:fs"
-import { createEffect, onCleanup } from "solid-js"
+import { createEffect, createSignal, onCleanup } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
-import { formatTitle, inWarp, PLUGIN_VERSION, richSequence, truncate } from "./payload"
+import { formatTitle, inKaku, inWarp, PLUGIN_VERSION, richSequence, SPINNER, SPINNER_MS, truncate } from "./payload"
 import { createTransitions, type AgentState } from "./transitions"
 
 const HANDSHAKE_DELAY_MS = 1000
@@ -13,17 +13,26 @@ const SETTLE_MS = 3000
 export default {
   id: "warp",
   setup(ctx) {
+    const kaku = inKaku(process.env)
+    // Kaku shows app titles verbatim, so a running session gets ocode's spinner there; elsewhere a static "•".
+    const [frame, setFrame] = createSignal(0)
+    createEffect(() => {
+      if (!kaku || ctx.paseo.current()?.status !== "running") return
+      const timer = setInterval(() => setFrame((n) => n + 1), SPINNER_MS)
+      onCleanup(() => clearInterval(timer))
+    })
     let lastTitle: string | undefined
     createEffect(() => {
       const agent = ctx.paseo.current()
       const indicator = agent?.pendingPermissions.length || agent?.requiresAttention && agent.attentionReason === "permission" ? "🟡 "
-        : agent?.status === "running" ? "• " : agent?.status === "error" || agent?.attentionReason === "error" ? "🔴 "
+        : agent?.status === "running" ? (kaku ? SPINNER[frame() % SPINNER.length] + " " : "• ")
+        : agent?.status === "error" || agent?.attentionReason === "error" ? "🔴 "
         : agent?.attentionReason === "finished" ? "✓ " : ""
       const title = formatTitle(agent && ctx.paseo.sessionTitle(agent), indicator)
       if (title !== lastTitle) ctx.renderer.setTerminalTitle(lastTitle = title)
     })
 
-    if (ctx.options.notifications === false || !inWarp(process.env)) return
+    if (ctx.options.notifications === false || !(inWarp(process.env) || kaku)) return
     const write = (sequence: string | undefined) => {
       if (!sequence) return
       try { writeFileSync("/dev/tty", sequence) }
@@ -74,11 +83,17 @@ export default {
         } else if (change.event === "permission_request") {
           const pending = agent.pendingPermissions[0]
           if (onScreen) rich("permission_request", agent, { summary: formatTitle(agent.title), tool_name: pending?.name ?? "permission", tool_input: pending?.input ?? {} })
+          if (onScreen && kaku) ctx.renderer.triggerNotification("Needs your input", formatTitle(agent.title, "🟡 "))
         } else if (change.event === "permission_replied") {
           if (onScreen) rich("permission_replied", agent)
         } else if (change.event === "stop") {
           busy.delete(agent.id)
           if (onScreen) rich("stop", agent, { query: lastText(agent.id, "user_message"), response: lastText(agent.id, "assistant_message"), transcript_path: "" })
+          // Kaku, like ocode there: one notification per event, only for the session on screen.
+          if (onScreen && kaku) {
+            const title = formatTitle(agent.title, change.outcome === "error" ? "🔴 " : "✓ ")
+            ctx.renderer.triggerNotification(lastText(agent.id, "assistant_message").replace(/\s+/g, " ") || "Session done", title)
+          }
         } else if (change.event === "settled" && onScreen && busy.has(agent.id)) {
           settleTimers.set(agent.id, setTimeout(() => {
             const now = ctx.paseo.agents[agent.id]
