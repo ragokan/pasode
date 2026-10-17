@@ -9,6 +9,9 @@ export function offsetWidth(value: string) {
   return width
 }
 
+/** The name in a typed "/rename <name>"; Claude Code's own /rename would rename only its session, not Paseo's. */
+export const renameArgument = (text: string) => /^\/rename\s+(\S[\s\S]*)$/.exec(text.trim())?.[1]
+
 /** slashTriggerIndex: a "/" at the start or after whitespace, with no whitespace or further "/" up to the cursor. */
 export function slashTrigger(beforeCursor: string) {
   for (let index = beforeCursor.lastIndexOf("/"); index >= 0; index = beforeCursor.lastIndexOf("/", index - 1)) {

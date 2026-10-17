@@ -122,10 +122,10 @@ export async function exportTranscript() {
 }
 
 /** OpenCode's session rename → Paseo's updateAgent({ name }), plus the workspace title a lone session shows. */
-export async function rename(id = current()?.id) {
+export async function rename(id = current()?.id, value?: string) {
   const agent = id ? agents[id] : undefined
   if (!agent) return
-  const name = await dialogs.prompt({ title: "Rename session", value: sessionTitle(agent) ?? "" })
+  const name = value ?? await dialogs.prompt({ title: "Rename session", value: sessionTitle(agent) ?? "" })
   if (!name?.trim()) return
   const workspace = ownWorkspace(agent)
   await Promise.all([daemon.updateAgent(agent.id, { name: name.trim() }), workspace && daemon.setWorkspaceTitle(workspace, name.trim())])

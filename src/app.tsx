@@ -18,6 +18,7 @@ import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth
 import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
+import { renameArgument } from "./prompt/slash"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef } from "./session"
 import { DialogSettings } from "./settings"
 import { Sidebar, sidebarFeatures } from "./sidebar"
@@ -587,6 +588,8 @@ export function App(props: { initialAgentId?: string }) {
   async function submit(input: PromptSubmit) {
     const agent = current()
     const images = input.images.length ? input.images : undefined
+    const name = renameArgument(input.text)
+    if (agent && name && !images) return void (await actions.rename(agent.id, name))
     const messageId = crypto.randomUUID()
     rememberImages(messageId, images)
     try {

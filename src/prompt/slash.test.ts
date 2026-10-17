@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { offsetWidth, slashTrigger } from "./slash"
+import { offsetWidth, renameArgument, slashTrigger } from "./slash"
+
+test("a typed /rename with a name is ours, not the provider's", () => {
+  expect(renameArgument("/rename Fix login ")).toBe("Fix login")
+  expect(renameArgument("/rename")).toBeUndefined()
+  expect(renameArgument("/renamed x")).toBeUndefined()
+  expect(renameArgument("please /rename x")).toBeUndefined()
+})
 
 test("slash completion triggers at the start or after whitespace, mid-text included", () => {
   expect(slashTrigger("/rev")).toEqual({ index: 0, query: "rev" })

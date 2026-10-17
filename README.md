@@ -56,7 +56,8 @@ Quitting from a session prints its title and `pasode -s <id>` to continue, like 
 - **Navigation**: jump to message (`ctrl+x g`), previous/next message (`ctrl+x [` / `]`), first/last, page up/down.
 - **Prompt**: only what Paseo takes: the typed text, sent as-is, plus native image attachments (`ctrl+v` or a pasted
   image path; thumbnails above the input, click or backspace-on-empty removes). `/` completion anywhere in the text
-  (ours plus the provider's commands and skills, on the home screen too), `$EDITOR` (`ctrl+x e`), mid-turn messages
+  (ours plus the provider's commands and skills, on the home screen too; a typed `/rename <name>` is ours, so
+  the Paseo title changes, not only Claude Code's own session name), `$EDITOR` (`ctrl+x e`), mid-turn messages
   steer the turn.
 - **Agent**: model (`ctrl+x m`), variant cycle (`ctrl+t`; `/variants`
   lists them), fast mode, Paseo mode (`/mode`), MCP servers (`/mcps`, live Claude health).
