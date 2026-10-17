@@ -22,17 +22,47 @@ export default {
       onCleanup(() => clearInterval(timer))
     })
     let lastTitle: string | undefined
+    // The host acknowledges a finish on the session you look at, clearing its flag; keep ✓/🔴 until it runs again.
+    const outcome = new Map<string, "finished" | "error">()
     createEffect(() => {
       const agent = ctx.paseo.current()
-      const indicator = agent?.pendingPermissions.length || agent?.requiresAttention && agent.attentionReason === "permission" ? "🟡 "
+      const reason = agent?.attentionReason
+      if (agent?.status === "running") outcome.delete(agent.id)
+      else if (agent && (reason === "finished" || reason === "error")) outcome.set(agent.id, reason)
+      const last = agent && outcome.get(agent.id)
+      const indicator = agent?.pendingPermissions.length || agent?.requiresAttention && reason === "permission" ? "🟡 "
         : agent?.status === "running" ? (kaku ? SPINNER[frame() % SPINNER.length] + " " : "• ")
-        : agent?.status === "error" || agent?.attentionReason === "error" ? "🔴 "
-        : agent?.attentionReason === "finished" ? "✓ " : ""
+        : agent?.status === "error" || last === "error" ? "🔴 "
+        : last === "finished" ? "✓ " : ""
       const title = formatTitle(agent && ctx.paseo.sessionTitle(agent), indicator)
       if (title !== lastTitle) ctx.renderer.setTerminalTitle(lastTitle = title)
     })
 
     if (ctx.options.notifications === false || !(inWarp(process.env) || kaku)) return
+    if (kaku) {
+      // Paseo notifies one present client per finish (its computeNotificationPlan). Report this one as present, with
+      // its shown session and terminal focus, so the desktop app or a phone doesn't repeat Kaku's notification.
+      let visible = true
+      const beat = () => {
+        try {
+          ctx.paseo.daemon.sendHeartbeat({ deviceType: "web", focusedAgentId: ctx.paseo.agentId() ?? null, appVisible: visible, lastActivityAt: new Date().toISOString() })
+        } catch {}
+      }
+      const focus = () => { visible = true; beat() }
+      const blur = () => { visible = false; beat() }
+      ctx.renderer.on("focus", focus)
+      ctx.renderer.on("blur", blur)
+      const events = ctx.paseo.daemon.observeEvents(["agent_attention_required"], { notifications: true })
+      events.ready.catch(() => {})
+      createEffect(beat) // and whenever the shown session changes
+      const heartbeat = setInterval(beat, 30_000)
+      onCleanup(() => {
+        clearInterval(heartbeat)
+        ctx.renderer.off("focus", focus)
+        ctx.renderer.off("blur", blur)
+        void events.release().catch(() => {})
+      })
+    }
     const write = (sequence: string | undefined) => {
       if (!sequence) return
       try { writeFileSync("/dev/tty", sequence) }

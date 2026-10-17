@@ -136,18 +136,34 @@ test("in Kaku: an animated spinner while running, one notification per event for
       const [agents, setAgents] = createSignal({ a: agent("a", "running"), b: agent("b", "running") })
       const titles = []
       const notes = []
-      createRoot(() => plugin.setup({
+      const beats = []
+      const listeners = {}
+      const observed = []
+      let released = false
+      const dispose = createRoot((dispose) => (plugin.setup({
         options: {},
-        renderer: { setTerminalTitle: (title) => titles.push(title), triggerNotification: (message, title) => notes.push([title, message]) },
+        renderer: {
+          setTerminalTitle: (title) => titles.push(title), triggerNotification: (message, title) => notes.push([title, message]),
+          on: (name, fn) => { listeners[name] = fn }, off: (name, fn) => { if (listeners[name] === fn) delete listeners[name] },
+        },
         paseo: {
           current: () => agents().a, agentId: () => "a", sessionTitle: (agent) => agent.title,
           get agents() { return agents() }, get timeline() { return { agentId: "a", rows: [{ type: "assistant_message", text: "All done.\\n\\nSee diff" }] } },
+          daemon: {
+            sendHeartbeat: (beat) => beats.push(beat),
+            observeEvents: (...args) => { observed.push(args); return { ready: Promise.resolve(), release: async () => { released = true } } },
+          },
         },
-      }))
+      }), dispose))
+      // Paseo picks one present client to notify; this one reports its session and focus.
+      assert.deepEqual(observed, [[["agent_attention_required"], { notifications: true }]])
+      assert.deepEqual([beats[0].deviceType, beats[0].focusedAgentId, beats[0].appVisible], ["web", "a", true])
+      listeners.blur()
+      assert.equal(beats.at(-1).appVisible, false)
       assert.equal(titles.at(-1), "⠲ a")
-      const live = intervals.filter((timer) => timer.live)
-      assert.deepEqual(live.map((timer) => timer.ms), [250])
-      live[0].fn()
+      const spinner = intervals.filter((timer) => timer.live && timer.ms === 250)
+      assert.equal(spinner.length, 1)
+      spinner[0].fn()
       assert.equal(titles.at(-1), "⠰ a")
       setAgents({ ...agents(), a: agent("a", "running", { pendingPermissions: [{ name: "Edit", input: {} }] }) })
       setAgents({ ...agents(), a: agent("a", "running") })
@@ -156,6 +172,16 @@ test("in Kaku: an animated spinner while running, one notification per event for
       setAgents({ ...agents(), b: agent("b", "idle", finished) })
       assert.deepEqual(notes, [["🟡 a", "Needs your input"], ["✓ a", "All done. See diff"]])
       assert.equal(titles.at(-1), "✓ a")
+      // The host acknowledges the finish on screen; the ✓ stays until the session runs again.
+      setAgents({ ...agents(), a: agent("a", "idle") })
+      assert.equal(titles.at(-1), "✓ a")
+      assert.deepEqual(intervals.filter((timer) => timer.live).map((timer) => timer.ms), [30000])
+      setAgents({ ...agents(), a: agent("a", "running") })
+      assert.equal(titles.at(-1)[1], " ")
+      assert.notEqual(titles.at(-1), "✓ a")
+      dispose()
+      assert.equal(released, true)
+      assert.deepEqual(Object.keys(listeners), [])
       assert.equal(intervals.filter((timer) => timer.live).length, 0)
     `],
     cwd: host,
