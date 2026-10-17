@@ -2,7 +2,7 @@ import type { AgentTimelineItem, ToolCallDetail } from "@getpaseo/protocol/agent
 import { CodeRenderable, DiffRenderable, ImageRenderable, MarkdownRenderable, type Renderable } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, spyOn, test } from "bun:test"
 import { createSignal } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { Transcript, type TranscriptProps, type TranscriptRef } from "../session"
@@ -340,4 +340,18 @@ test("tail budget counts rows a group shows inline, one for a collapsed group", 
   setGrouping("auto")
   await flush()
   expect(ids()[0]).toBe("row-0")
+})
+
+test("a page prepended while pinned doesn't mount above the pinned rows, not even for one pass", async () => {
+  const [state, setState] = createStore({ rows: users(0, 50) })
+  let ref: TranscriptRef | undefined
+  screen = await testRender(() => <Transcript {...defaults} rows={state.rows} times={state.rows.map(() => 1000)} ref={(r) => (ref = r)} />, { width: 80, height: 20 })
+  await flush()
+  ref!.pin(true)
+  const add = spyOn(screen.renderer.root, "add")
+  const insert = spyOn(screen.renderer.root, "insertBefore")
+  setState(produce((draft) => void draft.rows.unshift(...users(-300, 300))))
+  // Only the 40 pinned rows remount under their shifted index keys.
+  expect(add.mock.calls.length + insert.mock.calls.length).toBe(40)
+  expect(ids()[0]).toBe("row-310")
 })

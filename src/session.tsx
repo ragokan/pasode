@@ -91,29 +91,35 @@ export function Transcript(props: TranscriptProps): JSX.Element {
   // OpenCode's tail-first mounting: only the newest nodes mount; older ones mount on demand. Budgeted like its
   // rowWeight: a collapsed group costs one, a group showing its rows costs each of them.
   const weights = createMemo(() => nodes().map((node) => node.type === "group" && (!grouped(node.kind, props) || openByDefault(node.kind, props)) ? node.indices.length : 1))
-  /** First mounted row while pinned; unset follows the tail. */
-  const [pinned, setPinned] = createSignal<number>()
+  /** First mounted row while pinned, and the first timeline row then; unset follows the tail. */
+  const [pinned, setPinned] = createSignal<{ row: number; head: AgentTimelineItem | undefined }>()
+  const pinAt = (row: number) => setPinned({ row, head: props.rows[0] })
   const first = createMemo(() => {
-    const row = pinned()
+    const pin = pinned()
+    // History prepended since (loadOlder) moves the pinned row down with it, in this same pass: an effect would
+    // first mount the whole prepended page.
+    const row = pin && pin.row + (pin.head ? Math.max(0, props.rows.indexOf(pin.head)) : 0)
     const at = row === undefined ? Infinity : Math.max(0, nodes().findLastIndex((node) => node.index <= row))
     return Math.min(at, nodesBefore(weights(), weights().length, TAIL))
   })
-  // Older history prepended above keeps the same rows mounted; an emptied timeline (switch, reload) starts over.
-  createEffect(on(() => props.rows[0], (head, previous) => {
-    const shift = previous ? props.rows.indexOf(previous) : -1
-    if (!head) setPinned(undefined)
-    else if (shift > 0) setPinned((row) => (row === undefined ? row : row + shift))
-  }))
+  // An emptied timeline (session switch, reload) starts over at the tail.
+  createEffect(() => {
+    if (!props.rows.length) setPinned(undefined)
+  })
   props.ref?.({
     hidden: () => first() > 0,
     reveal: (row) => {
       const current = first()
       const target = row === undefined ? nodesBefore(weights(), current, CHUNK) : Math.max(0, nodes().findLastIndex((node) => node.index <= row))
       if (target >= current) return false
-      setPinned(nodes()[target]!.index)
+      pinAt(nodes()[target]!.index)
       return true
     },
-    pin: (keep) => setPinned((row) => (keep ? (row ?? nodes()[first()]?.index) : undefined)),
+    pin: (keep) => {
+      if (!keep) return setPinned(undefined)
+      const node = nodes()[first()]
+      if (!pinned() && node) pinAt(node.index)
+    },
   })
   return <TranscriptNodes nodes={nodes().slice(first())} transcript={props} footers={footers()} />
 }
