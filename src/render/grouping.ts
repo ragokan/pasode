@@ -50,6 +50,15 @@ export function groupTranscript(rows: readonly AgentTimelineItem[], verbosity: V
   return result
 }
 
+// Ported from OpenCode routes/session/mount-budget.ts rowsBefore (MIT); see OPENCODE-LICENSE.
+/** First index such that nodes [index, end) spend at least `budget`. */
+export function nodesBefore(weights: readonly number[], end: number, budget: number) {
+  let index = end
+  let spent = 0
+  while (index > 0 && spent < budget) spent += weights[--index]!
+  return index
+}
+
 // Ported from OpenCode 2.0.26 activity-summary.ts (MIT); see OPENCODE-LICENSE.
 export function activitySummary(rows: readonly AgentTimelineItem[], indices: readonly number[], running: boolean) {
   const counts = { command: 0, edit: 0, thought: 0, read: 0, tool: 0 }

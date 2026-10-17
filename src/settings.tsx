@@ -13,6 +13,7 @@ const onOff = { values: [false, true], labels: ["off", "on"] }
 export const settings: Setting[] = [
   { title: "Theme", category: "Appearance", key: "theme" },
   { title: "Color mode", category: "Appearance", key: "themeMode", values: ["dark", "light"] },
+  { title: "Animations", category: "Appearance", key: "animations", ...onOff },
   { title: "Sidebar", category: "Session", key: "sidebar", values: ["hide", "auto", "show"] },
   { title: "Scrollbar", category: "Session", key: "scrollbar", ...onOff },
   { title: "Thinking", category: "Session", key: "thinking", values: ["hide", "show"] },
@@ -24,6 +25,7 @@ export const settings: Setting[] = [
   { title: "New session location", category: "Session", key: "newLocation", values: ["launch", "inherit"], labels: ["launch directory", "active session"] },
   { title: "Permissions", category: "Session", key: "permissions", values: ["prompt", "bypass"] },
   { title: "Layout", category: "Diffs", key: "diffs", values: ["auto", "split", "unified"] },
+  { title: "Mouse", category: "Input", key: "mouse", ...onOff },
 ]
 
 export function nextValue(values: readonly unknown[], current: unknown, direction: number) {

@@ -28,6 +28,10 @@ export type PasodeConfig = {
     permissions?: "bypass" | "prompt"
   }
   attention?: { notifications?: boolean }
+  /** OpenCode's: interface animations (spinners); off shows still glyphs. */
+  animations?: boolean
+  /** OpenCode's: terminal mouse capture. */
+  mouse?: boolean
 }
 
 const home = os.homedir()

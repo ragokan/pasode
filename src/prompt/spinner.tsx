@@ -1,5 +1,7 @@
 import { RGBA } from "@opentui/core"
-import { createMemo, createSignal, For, onCleanup } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { prefs } from "../state"
+import { theme } from "../theme"
 
 // OpenCode v2.0.26 ui/spinner.ts (MIT): blocks, width 8, trail 6, holds 9/30.
 // Specialised to the prompt's settings; no opentui-spinner dependency.
@@ -22,8 +24,15 @@ export function blocksFrame(frame: number, color: RGBA) {
 
 export function PromptSpinner(props: { color: RGBA }) {
   const [frame, setFrame] = createSignal(0)
-  const timer = setInterval(() => setFrame((frame) => (frame + 1) % 54), 40)
-  onCleanup(() => clearInterval(timer))
+  createEffect(() => {
+    if (!prefs.animations) return
+    // Half OpenCode's 25 fps: every other frame, same cycle time, half the redraws.
+    const timer = setInterval(() => setFrame((frame) => (frame + 2) % 54), 80)
+    onCleanup(() => clearInterval(timer))
+  })
   const blocks = createMemo(() => blocksFrame(frame(), props.color))
-  return <text wrapMode="none"><For each={blocks()}>{(block) => <span style={{ fg: block.color }}>{block.text}</span>}</For></text>
+  // OpenCode's still prompt indicator with animations off.
+  return <Show when={prefs.animations} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
+    <text wrapMode="none"><For each={blocks()}>{(block) => <span style={{ fg: block.color }}>{block.text}</span>}</For></text>
+  </Show>
 }

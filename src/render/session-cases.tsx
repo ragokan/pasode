@@ -4,7 +4,9 @@ import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, test } from "bun:test"
 import { createSignal } from "solid-js"
-import { PermissionPrompt, TimelineRow } from "../session"
+import { PromptSpinner } from "../prompt/spinner"
+import { PermissionPrompt, Spinner, TimelineRow } from "../session"
+import { setPref } from "../state"
 import { syntax, theme } from "../theme"
 import { timestampLabel } from "./helpers"
 
@@ -244,4 +246,24 @@ test("new permission requests reset answers; malformed options are ignored and n
   screen.mockInput.pressEnter()
   await screen.flush()
   expect(responses[1]).toEqual({ behavior: "allow", updatedInput: { answers: { constructor: "No" } } })
+})
+
+test("animations off: spinners show OpenCode's still glyphs and stop redrawing; on resumes them", async () => {
+  setPref("animations", false)
+  try {
+    screen = await testRender(() => <box><Spinner>Thinking</Spinner><PromptSpinner color={theme.agent} /></box>, { width: 40, height: 4 })
+    await screen.renderOnce()
+    const still = screen.captureCharFrame()
+    expect(still).toContain("⋯ Thinking")
+    expect(still).toContain("[⋯]")
+    await Bun.sleep(250)
+    await screen.renderOnce()
+    expect(screen.captureCharFrame()).toBe(still)
+    setPref("animations", true)
+    await Bun.sleep(250)
+    await screen.renderOnce()
+    expect(screen.captureCharFrame()).not.toContain("⋯")
+  } finally {
+    setPref("animations", true)
+  }
 })

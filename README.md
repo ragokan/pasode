@@ -30,13 +30,16 @@ Same shape as OpenCode's `cli.json` where it overlaps:
   "leader": "ctrl+x",
   "keybinds": { "agent.cycle": "shift+tab", "session.sidebar.toggle": "ctrl+b" }, // ids: ctrl+x h; "none" disables
   "session": { "sidebar": "auto", "sidebarWidth": 30, "thinking": "show", "verbosity": "medium", "permissions": "bypass" },
+  "animations": true, // false: still ⋯ instead of spinners
+  "mouse": true, // false: no terminal mouse capture
   "plugins": ["~/coding/pasode/okan-plugins"] // or ["path", { options }]
 }
 ```
 
 Runtime choices (theme, toggles, last model) persist in `~/.local/state/pasode/kv.json`. `/settings` is OpenCode's
-settings dialog (←/→ changes a value) for the ones pasode honors: theme, color mode, sidebar, scrollbar, thinking,
-markdown, tool grouping, verbosity, transcript images, TPS, new session location, permissions, diff layout.
+settings dialog (←/→ changes a value) for the ones pasode honors: theme, color mode, animations, sidebar, scrollbar,
+thinking, markdown, tool grouping, verbosity, transcript images, TPS, new session location, permissions, diff layout,
+mouse. "Toggle animations" is also in the command palette.
 Quitting from a session prints its title and `pasode -s <id>` to continue, like OpenCode.
 
 ## What's there
@@ -59,7 +62,9 @@ Quitting from a session prints its title and `pasode -s <id>` to continue, like 
   lists them), fast mode, Paseo mode (`/mode`), MCP servers (`/mcps`, live Claude health).
 - **Rendering**: OpenCode 2.0.26's transcript: collapsed activity groups by `verbosity`, reasoning, tool blocks,
   colored unified/split diffs, image thumbnails (sent images and images tools return), `Build · model · time · tok/s`
-  turn footers, timestamps, permission / plan / question prompts (with free-text "Other…").
+  turn footers, timestamps, permission / plan / question prompts (with free-text "Other…"). Like OpenCode, only the
+  newest 40 transcript rows mount; scrolling up, pageup, jumps and `ctrl+g` mount older ones (60 at a time).
+  Spinners run at half OpenCode's frame rate.
 - **View/System**: theme switcher with live preview (`ctrl+x t`), sidebar (`ctrl+b`), help with every keybind id
   (`ctrl+x h`), `/status` (daemon, providers, plugins).
 

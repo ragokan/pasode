@@ -3,7 +3,7 @@ import { App } from "./app"
 import { sessionEpilogue } from "./logo"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
 import { rendererOptions } from "./renderer"
-import { agentId } from "./state"
+import { agentId, prefs } from "./state"
 
 const usage = `paseo-tui [-s] [agent-id]
 
@@ -29,6 +29,7 @@ try {
 
 await render(() => <App initialAgentId={arg} />, {
   ...rendererOptions,
+  useMouse: prefs.mouse,
   onDestroy: () => {
     const id = agentId()
     if (id) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")

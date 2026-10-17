@@ -4,7 +4,8 @@ import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, test } from "bun:test"
 import { createSignal } from "solid-js"
-import { Transcript, type TranscriptProps } from "../session"
+import { createStore, produce } from "solid-js/store"
+import { Transcript, type TranscriptProps, type TranscriptRef } from "../session"
 import { theme } from "../theme"
 import { timestampLabel } from "./helpers"
 
@@ -275,4 +276,68 @@ test("interrupted footer is muted and terminal errors are displayed once", async
   expect(screen.captureCharFrame()).toContain("Build · Opus 5.5 · 1.0s · interrupted")
   expect(screen.captureCharFrame()).not.toContain("Error:")
   expect(screen.captureSpans().lines.flatMap((line) => line.spans).find((span) => span.text.includes("Build"))?.fg).toEqual(theme.textMuted)
+})
+
+const ids = () => screen!.renderer.root.getChildren().map((node) => node.id)
+const users = (from: number, count: number) => Array.from({ length: count }, (_, i): AgentTimelineItem => ({ type: "user_message", text: `m${from + i}` }))
+
+test("tail-first: only the newest 40 nodes mount; reveal mounts older chunks or back to a row", async () => {
+  const rows = users(0, 120)
+  let ref: TranscriptRef | undefined
+  screen = await testRender(() => <Transcript {...defaults} rows={rows} times={rows.map(() => 1000)} ref={(r) => (ref = r)} />, { width: 80, height: 20 })
+  await flush()
+  expect(ids()).toEqual(Array.from({ length: 40 }, (_, i) => `row-${80 + i}`))
+  expect(ref!.hidden()).toBe(true)
+  expect(ref!.reveal()).toBe(true)
+  await flush()
+  expect(ids()[0]).toBe("row-20")
+  expect(ref!.reveal(30)).toBe(false)
+  expect(ref!.reveal(5)).toBe(true)
+  await flush()
+  expect(ids()[0]).toBe("row-5")
+  expect(ids()).toHaveLength(115)
+  expect(ref!.reveal()).toBe(true)
+  await flush()
+  expect(ids()[0]).toBe("row-0")
+  expect(ref!.hidden()).toBe(false)
+  expect(ref!.reveal()).toBe(false)
+})
+
+test("pinned rows stay mounted across appends and prepended history; unpinned follow the tail", async () => {
+  const [state, setState] = createStore({ rows: users(0, 50) })
+  let ref: TranscriptRef | undefined
+  screen = await testRender(() => <Transcript {...defaults} rows={state.rows} times={state.rows.map(() => 1000)} ref={(r) => (ref = r)} />, { width: 80, height: 20 })
+  await flush()
+  expect(ids()[0]).toBe("row-10")
+  ref!.pin(true)
+  setState(produce((draft) => void draft.rows.push(...users(50, 2))))
+  await flush()
+  expect(ids()[0]).toBe("row-10")
+  // loadOlder's unshift: the same row (now index 15) stays first.
+  setState(produce((draft) => void draft.rows.unshift(...users(-5, 5))))
+  await flush()
+  expect(ids()[0]).toBe("row-15")
+  expect(state.rows[15]!.type === "user_message" && state.rows[15]!.text).toBe("m10")
+  ref!.pin(false)
+  await flush()
+  expect(ids()[0]).toBe("row-17")
+  // A session switch empties the timeline; the next one starts at its tail.
+  ref!.reveal(0)
+  ref!.pin(true)
+  setState("rows", [])
+  setState("rows", users(0, 50))
+  await flush()
+  expect(ids()[0]).toBe("row-10")
+})
+
+test("tail budget counts rows a group shows inline, one for a collapsed group", async () => {
+  const reads = (count: number) => Array.from({ length: count }, (_, i) => tool({ type: "read", filePath: `${i}.ts` }))
+  const rows = [0, 1, 2].flatMap((turn) => [...users(turn, 1), ...reads(30)])
+  const [grouping, setGrouping] = createSignal<"auto" | "none">("none")
+  screen = await testRender(() => <Transcript {...defaults} rows={rows} times={rows.map(() => 1000)} grouping={grouping()} />, { width: 80, height: 20 })
+  await flush()
+  expect(ids()[0]).toBe("row-32")
+  setGrouping("auto")
+  await flush()
+  expect(ids()[0]).toBe("row-0")
 })

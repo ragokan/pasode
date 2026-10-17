@@ -5,10 +5,11 @@ import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show
 import { dialog, truncate } from "./dialog"
 import type { Mark } from "./paseo"
 import { truncateFilePath } from "./render/file-path"
-import { activitySummary, explorationSummary, groupTranscript, reasoningContent, reasoningTitle, type Grouping, type TranscriptNode, type Verbosity } from "./render/grouping"
+import { activitySummary, explorationSummary, groupTranscript, nodesBefore, reasoningContent, reasoningTitle, type GroupKind, type Grouping, type TranscriptNode, type Verbosity } from "./render/grouping"
 import { collapseToolOutput, editDiff, filetype, reasoningSummary, timestampLabel } from "./render/helpers"
 import { collapseShellOutput } from "./render/shell-output"
 import { durationLabel, turnFooters, type TurnFooter } from "./render/turns"
+import { prefs } from "./state"
 import { collapseForkContext, errorText, imageFile, toolSummary, type AgentTimelineItem, type ToolCallTimelineItem } from "./timeline"
 import { syntax, theme } from "./theme"
 
@@ -31,11 +32,16 @@ export const SplitBorder = { ...EmptyBorder, vertical: "┃" }
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 export function Spinner(props: { color?: typeof theme.text; children?: string }) {
   const [frame, setFrame] = createSignal(0)
-  const timer = setInterval(() => setFrame((value) => (value + 1) % frames.length), 80)
-  onCleanup(() => clearInterval(timer))
+  createEffect(() => {
+    if (!prefs.animations) return
+    // Half OpenCode's 12.5 fps: every other frame, same cycle time, half the redraws.
+    const timer = setInterval(() => setFrame((value) => (value + 2) % frames.length), 160)
+    onCleanup(() => clearInterval(timer))
+  })
   return (
     <text fg={props.color ?? theme.textMuted}>
-      {frames[frame()]}
+      {/* OpenCode's still glyph with animations off. */}
+      {prefs.animations ? frames[frame()] : "⋯"}
       {props.children ? ` ${props.children}` : ""}
     </text>
   )
@@ -59,13 +65,57 @@ export type TranscriptProps = {
   /** OpenCode's session.image_preview: thumbnails in the transcript; chips either way. */
   images: boolean
   attachments?: (row: Extract<AgentTimelineItem, { type: "user_message" }>, index: number) => { mimeType: string; data?: string; name?: string }[]
+  ref?: (ref: TranscriptRef) => void
 }
+
+export type TranscriptRef = {
+  /** Whether older rows are left unmounted. */
+  hidden: () => boolean
+  /** Mounts the next older chunk, or back to `row`; false when that is already mounted. */
+  reveal: (row?: number) => boolean
+  /** Keep the mounted rows while the reader is away from the bottom; otherwise follow the tail. */
+  pin: (keep: boolean) => void
+}
+
+// OpenCode's TRANSCRIPT_TAIL_ROWS / TRANSCRIPT_BACKFILL_CHUNK.
+const TAIL = 40
+const CHUNK = 60
+
+const grouped = (kind: GroupKind, transcript: TranscriptProps) => kind === "activity" || (kind === "reasoning" ? transcript.thinking === "hide" : transcript.grouping !== "none")
+const openByDefault = (kind: GroupKind, transcript: TranscriptProps) => transcript.verbosity === "high" && kind === "exploration"
 
 // Ported from OpenCode 2.0.26 routes/session/index.tsx row dispatch (MIT); see render/OPENCODE-LICENSE.
 export function Transcript(props: TranscriptProps): JSX.Element {
   const nodes = createMemo(() => groupTranscript(props.rows, props.verbosity))
   const footers = createMemo(() => turnFooters(props.rows, props.times, props.marks, props.running))
-  return <TranscriptNodes nodes={nodes()} transcript={props} footers={footers()} />
+  // OpenCode's tail-first mounting: only the newest nodes mount; older ones mount on demand. Budgeted like its
+  // rowWeight: a collapsed group costs one, a group showing its rows costs each of them.
+  const weights = createMemo(() => nodes().map((node) => node.type === "group" && (!grouped(node.kind, props) || openByDefault(node.kind, props)) ? node.indices.length : 1))
+  /** First mounted row while pinned; unset follows the tail. */
+  const [pinned, setPinned] = createSignal<number>()
+  const first = createMemo(() => {
+    const row = pinned()
+    const at = row === undefined ? Infinity : Math.max(0, nodes().findLastIndex((node) => node.index <= row))
+    return Math.min(at, nodesBefore(weights(), weights().length, TAIL))
+  })
+  // Older history prepended above keeps the same rows mounted; an emptied timeline (switch, reload) starts over.
+  createEffect(on(() => props.rows[0], (head, previous) => {
+    const shift = previous ? props.rows.indexOf(previous) : -1
+    if (!head) setPinned(undefined)
+    else if (shift > 0) setPinned((row) => (row === undefined ? row : row + shift))
+  }))
+  props.ref?.({
+    hidden: () => first() > 0,
+    reveal: (row) => {
+      const current = first()
+      const target = row === undefined ? nodesBefore(weights(), current, CHUNK) : Math.max(0, nodes().findLastIndex((node) => node.index <= row))
+      if (target >= current) return false
+      setPinned(nodes()[target]!.index)
+      return true
+    },
+    pin: (keep) => setPinned((row) => (keep ? (row ?? nodes()[first()]?.index) : undefined)),
+  })
+  return <TranscriptNodes nodes={nodes().slice(first())} transcript={props} footers={footers()} />
 }
 
 // Ported from OpenCode 2.0.26 SessionRowView (MIT); see render/OPENCODE-LICENSE.
@@ -89,8 +139,7 @@ function TranscriptGroup(props: { node: Extract<TranscriptNode, { type: "group" 
   const renderer = useRenderer()
   const [expanded, setExpanded] = createSignal<boolean>()
   const [hover, setHover] = createSignal(false)
-  const open = () => expanded() ?? (props.transcript.verbosity === "high" && props.node.kind === "exploration")
-  const grouped = () => props.node.kind === "activity" || (props.node.kind === "reasoning" ? props.transcript.thinking === "hide" : props.transcript.grouping !== "none")
+  const open = () => expanded() ?? openByDefault(props.node.kind, props.transcript)
   const summary = createMemo(() => activitySummary(props.transcript.rows, props.node.indices, props.transcript.running))
   const exploration = createMemo(() => explorationSummary(props.transcript.rows, props.node.indices, props.transcript.running))
   const done = () => props.node.kind === "exploration" ? exploration().completed : !summary().active
@@ -113,7 +162,7 @@ function TranscriptGroup(props: { node: Extract<TranscriptNode, { type: "group" 
   const icon = () => props.node.kind === "exploration" ? "→" : open() ? props.node.kind === "activity" ? "−" : "-" : "+"
   const visible = () => props.node.kind !== "reasoning" || props.node.indices.some((i) => { const item = props.transcript.rows[i]; return item?.type === "reasoning" && reasoningContent(item.text) })
   return <Show when={visible()}>
-    <Show when={grouped()} fallback={<TranscriptNodes nodes={props.node.children} transcript={props.transcript} />}>
+    <Show when={grouped(props.node.kind, props.transcript)} fallback={<TranscriptNodes nodes={props.node.children} transcript={props.transcript} />}>
       <box paddingLeft={3}
         onMouseOver={() => setHover(true)} onMouseOut={() => setHover(false)}
         onMouseUp={() => !renderer.getSelection()?.getSelectedText() && setExpanded(!open())}>

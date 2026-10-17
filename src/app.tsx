@@ -18,7 +18,7 @@ import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth
 import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
-import { PermissionPrompt, Spinner, SplitBorder, Transcript } from "./session"
+import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef } from "./session"
 import { DialogSettings } from "./settings"
 import { Sidebar, sidebarFeatures } from "./sidebar"
 import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDraft, setPref, showError, subagent, toast } from "./state"
@@ -37,12 +37,14 @@ export function App(props: { initialAgentId?: string }) {
   const dimensions = useTerminalDimensions()
   let prompt: PromptRef | undefined
   let scroll: ScrollBoxRenderable | undefined
+  let transcript: TranscriptRef | undefined
   const [pending, setPending] = createSignal(false)
   const [escHint, setEscHint] = createSignal(false)
 
   // Theme from kv/config; the built-in palette stays if it can't load.
   loadTheme(prefs.theme, prefs.themeMode).then(applyTheme, () => {})
   void loadPlugins(renderer, sidebarFeatures)
+  createEffect(() => (renderer.useMouse = prefs.mouse))
 
   // Accept the short ID prefixes `paseo ls` prints.
   const initial = props.initialAgentId
@@ -85,12 +87,12 @@ export function App(props: { initialAgentId?: string }) {
     // OpenCode's ↓ under the prompt: only while the prompt is one line, so ↓ still moves through multi-line drafts.
     { id: "session.child.first", title: "Toggle subagent picker", category: "Session", keybind: "down", slash: "subagents", enabled: () => !!current() && !permission() && !prompt?.text().includes("\n"), run: toggleComposer },
     { id: "session.parent", title: "Go to parent session", category: "Session", keybind: "<leader>up", enabled: actions.hasParent, run: () => actions.openParent() },
-    { id: "session.older", title: "Load older messages", category: "Session", slash: "older", enabled: () => timeline.hasOlder, run: () => void loadOlder().catch(showError) },
+    { id: "session.older", title: "Load older messages", category: "Session", slash: "older", enabled: () => timeline.hasOlder || !!transcript?.hidden(), run: showOlder },
     { id: "session.reload", title: "Reload session", category: "Session", slash: "reload", enabled: () => !!current(), run: () => reload(agentId()!) },
     { id: "session.archive", title: "Archive session", category: "Session", slash: "archive", enabled: () => !!current(), run: archiveCurrent },
     { id: "messages.page_up", title: "Page up", category: "Navigation", keybind: "pageup", hidden: true, run: pageUp },
     { id: "messages.page_down", title: "Page down", category: "Navigation", keybind: "pagedown", hidden: true, run: () => scroll?.scrollBy(scroll.height - 2) },
-    { id: "messages.first", title: "First message", category: "Navigation", keybind: "ctrl+g", run: () => scroll?.scrollTo(0) },
+    { id: "messages.first", title: "First message", category: "Navigation", keybind: "ctrl+g", run: () => scrollToRow(0) },
     { id: "messages.last", title: "Last message", category: "Navigation", keybind: "ctrl+alt+g", run: () => scroll?.scrollTo(scroll.scrollHeight) },
     { id: "messages.previous", title: "Previous message", category: "Navigation", keybind: "<leader>[", run: () => jumpMessage(-1) },
     { id: "messages.next", title: "Next message", category: "Navigation", keybind: "<leader>]", run: () => jumpMessage(1) },
@@ -110,6 +112,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "theme.list", title: "Switch theme", category: "View", keybind: "<leader>t", slash: "themes", run: openThemes },
     { id: "editor.open", title: "Open prompt in $EDITOR", category: "Prompt", keybind: "<leader>e", slash: "editor", run: () => void prompt?.openEditor() },
     { id: "settings.show", title: "Open settings", category: "System", slash: "settings", run: () => dialog.replace(() => <DialogSettings />) },
+    { id: "app.toggle.animations", title: "Toggle animations", category: "System", run: () => (setPref("animations", !prefs.animations), notify(`Animations: ${prefs.animations ? "on" : "off"}`)) },
     { id: "help.show", title: "Help", category: "System", keybind: "<leader>h", slash: "help", run: openHelp },
     { id: "status.show", title: "Status", category: "System", slash: "status", run: openStatus },
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
@@ -300,10 +303,22 @@ export function App(props: { initialAgentId?: string }) {
     )
   }
 
+  /** Set while revealed rows lay out: a bottom-stuck scroll would otherwise unpin them before we move. */
+  let revealing = false
+  /** OpenCode's afterLayout: runs once newly mounted rows have their layout (two frames). */
+  const afterLayout = (run: (scroll: ScrollBoxRenderable) => void) =>
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        revealing = false
+        if (scroll && !scroll.isDestroyed) run(scroll)
+      }),
+    )
+
   let messageCursor: number | undefined
   function scrollToRow(index: number) {
     messageCursor = index
-    setTimeout(() => scroll?.scrollChildIntoView(`row-${index}`), 0)
+    revealing = !!transcript?.reveal(index)
+    afterLayout((scroll) => (index === 0 ? scroll.scrollTo(0) : scroll.scrollChildIntoView(`row-${index}`)))
   }
   function jumpMessage(delta: number) {
     const users = timeline.rows.flatMap((row, index) => (row.type === "user_message" ? [index] : []))
@@ -314,9 +329,28 @@ export function App(props: { initialAgentId?: string }) {
   }
   function pageUp() {
     if (!scroll) return
-    if (scroll.scrollTop <= 0 && timeline.hasOlder) return void loadOlder().catch(showError)
+    if (scroll.scrollTop <= 0 && showOlder()) return
     scroll.scrollBy(-(scroll.height - 2))
   }
+  /** Mounts the next older transcript chunk, keeping what's on screen in place. */
+  function revealOlder() {
+    const before = scroll?.scrollHeight ?? 0
+    if (!transcript?.reveal()) return false
+    revealing = true
+    afterLayout((scroll) => scroll.scrollBy(scroll.scrollHeight - before))
+    return true
+  }
+  /** Unmounted rows first, then the daemon's previous page. */
+  function showOlder() {
+    if (revealOlder()) return true
+    if (!timeline.hasOlder) return false
+    void loadOlder()
+      .then((loaded) => loaded && revealOlder())
+      .catch(showError)
+    return true
+  }
+  // Away from the bottom (or mid-selection) the mounted rows stay put; back at the bottom they follow the tail.
+  const followTail = () => !revealing && scroll && transcript?.pin(scroll.scrollTop + scroll.viewport.height < scroll.scrollHeight - 1 || !!renderer.getSelection())
 
   async function openModels() {
     const agent = current()
@@ -790,7 +824,11 @@ export function App(props: { initialAgentId?: string }) {
           <Slot name="session_header" agent={current()} />
           <box flexGrow={1} minHeight={0} position="relative">
             <scrollbox
-              ref={(r: ScrollBoxRenderable) => (scroll = r)}
+              ref={(r: ScrollBoxRenderable) => {
+                scroll = r
+                r.verticalScrollBar.on("change", followTail)
+              }}
+              onMouseScroll={(event) => event.scroll?.direction === "up" && scroll!.scrollTop <= scroll!.viewport.height && revealOlder()}
               flexGrow={1}
               stickyScroll
               stickyStart="bottom"
@@ -803,7 +841,7 @@ export function App(props: { initialAgentId?: string }) {
                 </box>
               </Show>
               <Show when={timeline.hasOlder}>
-                <box paddingLeft={3} marginTop={1} onMouseUp={() => void loadOlder().catch(showError)}>
+                <box paddingLeft={3} marginTop={1} onMouseUp={showOlder}>
                   <text fg={theme.textMuted}>↑ older messages · pageup at the top or /older</text>
                 </box>
               </Show>
@@ -824,6 +862,7 @@ export function App(props: { initialAgentId?: string }) {
                 markdown={prefs.markdown}
                 images={prefs.images}
                 attachments={attachmentsOf}
+                ref={(ref) => (transcript = ref)}
               />
             </scrollbox>
           </box>
