@@ -19,6 +19,7 @@ import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PRO
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { renameArgument } from "./prompt/slash"
+import { quit } from "./renderer"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef } from "./session"
 import { DialogSettings } from "./settings"
 import { Sidebar, sidebarFeatures } from "./sidebar"
@@ -68,7 +69,7 @@ export function App(props: { initialAgentId?: string }) {
   useTerminalPolling()
   // OpenCode's session.sidebar "auto": shown on wide terminals unless toggled.
   const sidebarVisible = () => !!current() && (prefs.sidebar === "show" || (prefs.sidebar === "auto" && dimensions().width >= 120))
-  const exit = () => renderer.destroy()
+  const exit = () => quit(renderer)
 
   const builtins: Command[] = [
     { id: "command.palette", title: "Commands", category: "System", keybind: "ctrl+p", hidden: true, run: openPalette },
