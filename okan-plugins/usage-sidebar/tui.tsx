@@ -2,18 +2,18 @@
 // Per-account rows come from ZeroSub (Paseo plugin) when installed, read-only via `zerosub.state`.
 import { createSignal, For, onCleanup, Show } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
-import { usageWindows, zeroSubAccounts, type ZeroSubState } from "./usage"
+import { reportAccounts, reportWindows, zeroSubAccounts, type Window, type ZeroSubState } from "./usage"
 
 const PROVIDERS = [{ id: "claude", name: "Claude" }, { id: "codex", name: "Codex" }]
 
 export default {
   id: "usage-sidebar",
   setup(ctx) {
-    const Windows = (props: { list: ReturnType<typeof usageWindows> }) =>
+    const Windows = (props: { list: Window[] }) =>
       <text fg={ctx.theme.text} flexGrow={1} flexShrink={1} flexBasis={0} textAlign="right" wrapMode="word">
         <Show when={props.list.length > 0} fallback="—">
           <For each={props.list}>{(window, index) => <>
-            {index() > 0 ? " · " : ""}<span style={{ fg: ctx.theme.textMuted }}>{window.countdown}</span> {window.percent}
+            {index() > 0 ? " · " : ""}<span style={{ fg: ctx.theme.textMuted }}>{window.countdown}</span> <span style={{ fg: window.stale ? ctx.theme.textMuted : ctx.theme.text }}>{window.percent}</span>
           </>}</For>
         </Show>
       </text>
@@ -39,14 +39,16 @@ export default {
       onCleanup(() => clearInterval(timer))
       return <box>
         <For each={PROVIDERS}>{(provider) => {
+          const reports = () => ctx.paseo.usage()?.filter((entry) => entry.sourceId === provider.id) ?? []
           const accounts = () => {
             const state = zeroSub()
-            return state ? zeroSubAccounts(state, props.agent?.id, now()).filter((account) => account.family === provider.id) : []
+            if (state) return zeroSubAccounts(state, props.agent?.id, now()).filter((account) => account.family === provider.id)
+            return reports().length > 1 ? reportAccounts(reports(), now()) : []
           }
           return <Show when={accounts().length > 0} fallback={
             <box flexDirection="row" width="100%" gap={1}>
               <text fg={ctx.theme.text} width={6} flexShrink={0}>{provider.name}</text>
-              <Windows list={usageWindows(ctx.paseo.usage()?.find((item) => item.providerId === provider.id), now())} />
+              <Windows list={reportWindows(reports()[0], now())} />
             </box>
           }>
             <box>
