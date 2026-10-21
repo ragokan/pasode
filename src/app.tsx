@@ -199,7 +199,7 @@ export function App(props: { initialAgentId?: string }) {
     const rtt = daemon.getLastLivenessRttMs()
     await statusDialog(
       [
-        `Daemon     ${info?.hostname ?? "?"} · Paseo ${status?.version ?? info?.version ?? "?"} · ${daemon.getConnectionState().status}${rtt ? ` · ${rtt}ms` : ""}`,
+        `Daemon     ${info?.hostname ?? "?"} · Paseo ${status?.version ?? info?.version ?? "?"} · ${daemon.getConnectionState().status}${rtt ? ` · ${rtt < 1 ? "<1" : Math.round(rtt)}ms` : ""}`,
         `Listen     ${status?.listen ?? "?"} · pid ${status?.pid ?? "?"}${status?.relay?.enabled ? ` · relay ${status.relay.endpoint}` : " · relay off"}`,
         `Daemon cfg ${configSummary(daemonConfig)}`,
         `Config     ${tilde(configPath)}`,
