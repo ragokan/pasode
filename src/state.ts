@@ -47,11 +47,15 @@ export type Prefs = {
   sidebar: "auto" | "show" | "hide"
   sidebarWidth: number
   diffs: "auto" | "unified" | "split"
+  diffWrap: "word" | "none"
   theme: string
   themeMode: "dark" | "light"
   animations: boolean
   mouse: boolean
   tabs: boolean
+  copyOnSelect: boolean
+  notifications: boolean
+  terminalTitle: boolean
 }
 const defaults: Prefs = {
   thinking: config.session?.thinking ?? "show",
@@ -68,11 +72,15 @@ const defaults: Prefs = {
   sidebar: config.session?.sidebar ?? "auto",
   sidebarWidth: config.session?.sidebarWidth ?? 30,
   diffs: config.session?.diffs ?? "auto",
+  diffWrap: "word",
   theme: config.theme?.name ?? "monokai-pro-ristretto",
   themeMode: config.theme?.mode ?? "dark",
   animations: config.animations ?? true,
   mouse: config.mouse ?? true,
   tabs: true,
+  copyOnSelect: true,
+  notifications: config.attention?.notifications ?? true,
+  terminalTitle: true,
 }
 const saved = kvGet<Partial<Prefs> & { thinking?: string }>("prefs", {})
 // The old "collapsed" thinking mode became OpenCode's verbosity grouping.

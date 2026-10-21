@@ -17,6 +17,7 @@ import { Logo } from "./logo"
 import { configSummary, registerManageCommands, statusDialog } from "./manage"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
 import { active, agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, waiting, type PaseoAgent } from "./paseo"
+import { favoriteModels, modelSections, recentModels, rememberModel, selectModel, toggleFavorite } from "./models"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { registerPromptCommands } from "./prompt/commands"
@@ -33,6 +34,7 @@ import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
 import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
 import { update } from "./update"
+import { copySelection, installUx } from "./ux"
 
 const home = os.homedir()
 const tilde = (value: string) => value.replace(home, "~")
@@ -130,6 +132,7 @@ export function App(props: { initialAgentId?: string }) {
   registerPromptCommands(() => prompt)
   registerTabs()
   registerManageCommands()
+  installUx(renderer, terminalFocused)
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -381,7 +384,7 @@ export function App(props: { initialAgentId?: string }) {
     const providers = agent ? [agent.provider] : [...PROVIDERS]
     const results = await Promise.all(providers.map((provider) => api.providers.listModels(provider))).catch(showError)
     if (!results) return
-    const options = results.flatMap((result) =>
+    const all = results.flatMap((result) =>
       (result.models ?? []).map((model) => ({
         title: model.label,
         value: `${result.provider}/${model.id}`,
@@ -389,18 +392,20 @@ export function App(props: { initialAgentId?: string }) {
         description: model.isDefault ? "default" : undefined,
       })),
     )
+    // Sections are fixed at open, so favoriting marks a row (★) without moving the cursor onto another model.
+    const options = modelSections(all, favoriteModels(), recentModels())
     const selected = agent ? `${agent.provider}/${agent.model ?? agent.runtimeInfo?.model}` : `${draft().provider}/${draft().model}`
     dialog.replace(() => (
       <DialogSelect
         title="Select model"
-        options={options}
+        options={options.map((option) => ({ ...option, footer: favoriteModels().includes(option.value) ? "★" : undefined }))}
         current={selected}
         onSelect={(option) => {
           dialog.clear()
-          const [provider, model] = option.value.split("/") as [string, string]
-          if (agent) daemon.setAgentModel(agent.id, model).catch(showError)
-          else rememberDraft({ ...draft(), provider, model, label: option.title, thinking: undefined })
+          rememberModel(option.value)
+          selectModel(option.value, option.title)
         }}
+        actions={[{ label: "ctrl+f", title: "favorite", match: (key) => key.ctrl && key.name === "f", run: (option) => toggleFavorite(option.value) }]}
       />
     ))
   }
@@ -669,6 +674,8 @@ export function App(props: { initialAgentId?: string }) {
       if (key.ctrl && key.name === "c") {
         keymap.reset()
         setPending(false)
+        // A mouse selection comes first: copy it and drop the highlight, rather than clearing the prompt or exiting.
+        if (copySelection(renderer)) return renderer.clearSelection(), true
         if (!prompt?.isEmpty()) return prompt?.clear(), true
         return exit(), true
       }

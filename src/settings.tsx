@@ -26,7 +26,11 @@ export const settings: Setting[] = [
   { title: "Permissions", category: "Session", key: "permissions", values: ["prompt", "bypass"] },
   { title: "Session tabs", category: "Session", key: "tabs", ...onOff },
   { title: "Layout", category: "Diffs", key: "diffs", values: ["auto", "split", "unified"] },
+  { title: "Wrapping", category: "Diffs", key: "diffWrap", values: ["none", "word"] },
   { title: "Mouse", category: "Input", key: "mouse", ...onOff },
+  { title: "Notifications", category: "Alerts", key: "notifications", ...onOff },
+  { title: "Window title", category: "Terminal", key: "terminalTitle", ...onOff },
+  { title: "Copy on select", category: "Terminal", key: "copyOnSelect", ...onOff },
 ]
 
 export function nextValue(values: readonly unknown[], current: unknown, direction: number) {

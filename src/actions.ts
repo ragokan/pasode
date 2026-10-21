@@ -2,6 +2,7 @@
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
 import { createSignal } from "solid-js"
+import { copyToClipboard } from "./copy"
 import { dialogs } from "./dialog"
 import { agents, api, daemon, findModel, loadOlder, ownWorkspace, sessionTitle, timeline, type PaseoAgent } from "./paseo"
 import { current, draft, navigate, notify, prefs, setDraft, showError, subagent } from "./state"
@@ -68,16 +69,8 @@ export async function createSession(text: string, images?: Images, messageId?: s
   return id
 }
 
-export async function copyText(text: string) {
-  // OSC 52 works over SSH/tmux too; pbcopy covers terminals that ignore it.
-  process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`)
-  if (process.platform === "darwin") {
-    const child = Bun.spawn(["pbcopy"], { stdin: "pipe" })
-    child.stdin.write(text)
-    child.stdin.end()
-    await child.exited
-  }
-}
+/** OSC 52 works over SSH/tmux too; the host clipboard (pbcopy, wl-copy, xclip, xsel) covers terminals that ignore it. */
+export const copyText = copyToClipboard
 
 export async function copyLastResponse() {
   const last = timeline.rows.findLast((row) => row.type === "assistant_message")
