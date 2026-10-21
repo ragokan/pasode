@@ -8,7 +8,7 @@ import pkg from "../package.json"
 import * as actions from "./actions"
 import { attachmentsOf, rememberImages } from "./attachments"
 import { commandBindings, commands, isEnabled, keybindLabel, leader, registerCommands, runCommand, type Command } from "./commands"
-import { Composer, composerOpen, handleComposerKey, runningSubagents, terminals, toggleComposer, useSubagentPolling, useTerminalPolling } from "./composer"
+import { Composer, composerOpen, handleComposerKey, registerTerminalCommands, runningSubagents, runShell, terminals, toggleComposer, useSubagentFeed, useTerminalFeed } from "./composer"
 import { configPath } from "./config"
 import { dialog, DialogHost, dialogs, DialogSelect, type SelectOption } from "./dialog"
 import { footerLayout, liveLabel, usageItems } from "./footer"
@@ -67,8 +67,8 @@ export function App(props: { initialAgentId?: string }) {
   const permission = createMemo(() => current()?.pendingPermissions?.[0])
   const cwd = () => current()?.cwd ?? draft().cwd ?? process.cwd()
   const running = () => current()?.status === "running"
-  useSubagentPolling(running)
-  useTerminalPolling()
+  useSubagentFeed()
+  useTerminalFeed()
   // OpenCode's session.sidebar "auto": shown on wide terminals unless toggled.
   const sidebarVisible = () => !!current() && (prefs.sidebar === "show" || (prefs.sidebar === "auto" && dimensions().width >= 120))
   const exit = () => quit(renderer)
@@ -123,6 +123,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
   ]
   registerCommands(builtins)
+  registerTerminalCommands()
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -601,6 +602,8 @@ export function App(props: { initialAgentId?: string }) {
   async function submit(input: PromptSubmit) {
     const agent = current()
     const images = input.images.length ? input.images : undefined
+    // `!command` runs in a Paseo terminal instead; to send a message that starts with "!", lead with a space.
+    if (input.text.startsWith("!") && !images) return void (await runShell(cwd(), input.text.slice(1)))
     const name = renameArgument(input.text)
     if (agent && name && !images) return void (await actions.rename(agent.id, name))
     const messageId = crypto.randomUUID()

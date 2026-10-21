@@ -191,25 +191,66 @@ export async function refreshUsage() {
 
 let closeTimeline: (() => void) | undefined
 
-/** Read-only timeline of a provider-native subagent; Paseo has no stream for these, so poll while open. */
+type SubagentFeedMessage = Parameters<Parameters<ReturnType<typeof daemon.observeEvents>["subscribe"]>[0]["update"]>[0]
+type SubagentUpdate = Extract<Extract<SubagentFeedMessage, { type: "agent.provider_subagents.update" }>["payload"], { kind: "timeline" }>
+
+/** Read-only timeline of a provider-native subagent: one fetch for the history, then the daemon's pushed items. */
 export async function openSubagentTimeline(parentId: string, subagentId: string) {
   closeTimeline?.()
   const open = ++opened
   older = undefined
   const key = `${parentId}:${subagentId}`
   setTimeline({ agentId: key, rows: [], times: [], marks: [], loading: true, hasOlder: false, startCursor: undefined })
+  let lastSeq = 0
+  let epoch: string | undefined
+  // Pushed items buffer until the first page lands; those it already holds are dropped by seq.
+  let buffered: SubagentUpdate[] | undefined = []
+  const apply = (update: SubagentUpdate) => {
+    if (update.seq <= lastSeq) return
+    lastSeq = update.seq
+    setTimeline(
+      produce((draft) => {
+        const before = draft.rows.length
+        applyTimelineItem(draft.rows, update.item)
+        if (draft.rows.length > before) draft.times.push(Date.parse(update.timestamp))
+      }),
+    )
+  }
   const load = async () => {
     const page = await daemon.fetchProviderSubagentTimeline(parentId, subagentId, { direction: "tail", limit: 0 })
     if (open !== opened) return
     if (page.error) throw new Error(page.error)
+    lastSeq = page.rows.reduce((max, row) => Math.max(max, row.seqEnd ?? row.seq ?? 0), 0)
+    epoch = page.epoch
     setTimeline({
       rows: page.rows.map((row) => row.item),
       times: page.rows.map((row) => Date.parse(row.timestamp)),
       loading: false,
     })
+    const pending = buffered ?? []
+    buffered = undefined
+    for (const update of pending) apply(update)
   }
-  const timer = setInterval(() => void load().catch(() => {}), 2000)
-  closeTimeline = () => clearInterval(timer)
+  // Subscribed before the fetch, so nothing falls between the page and the feed.
+  const feed = daemon.observeEvents(["agent.provider_subagents.update"])
+  let active = false
+  feed.subscribe({
+    // Updates aren't replayed across a reconnect; read the history again once the feed is back.
+    snapshot() {
+      if (active) void load().catch(() => {})
+      active = true
+    },
+    update(message) {
+      if (message.type !== "agent.provider_subagents.update" || open !== opened) return
+      const update = message.payload
+      if (update.kind !== "timeline" || update.parentAgentId !== parentId || update.subagentId !== subagentId) return
+      if (buffered) buffered.push(update)
+      // A new epoch means the child's history was rewritten.
+      else if (epoch && update.epoch !== epoch) void load().catch(() => {})
+      else apply(update)
+    },
+  })
+  closeTimeline = () => void feed.release().catch(() => {})
   await load()
 }
 
