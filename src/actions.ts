@@ -4,6 +4,7 @@ import path from "node:path"
 import { createSignal } from "solid-js"
 import { copyToClipboard } from "./copy"
 import { dialogs } from "./dialog"
+import { pickBaseBranch } from "./git/branches"
 import { agents, api, daemon, findModel, loadOlder, ownWorkspace, sessionTitle, timeline, type PaseoAgent } from "./paseo"
 import { current, draft, navigate, notify, prefs, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
@@ -49,7 +50,7 @@ export async function createSession(text: string, images?: Images, messageId?: s
   if (worktree) {
     // shortcut: workspace creation takes no clientMessageId, so the first message's image chips aren't linked.
     const created = await daemon.createWorkspace({
-      source: { kind: "worktree", cwd, action: "branch-off", ...(worktree.branch ? { branchName: worktree.branch } : {}) },
+      source: { kind: "worktree", cwd, action: "branch-off", ...(worktree.branch ? { branchName: worktree.branch } : {}), ...(worktree.base ? { refName: worktree.base } : {}) },
       agent: { config: { provider, model, cwd, ...modes, ...(thinking ? { thinkingOptionId: thinking } : {}) }, initialPrompt: text, images, attachments },
     })
     if (!created.agent) throw new Error(created.error ?? "The worktree was created but its session wasn't")
@@ -210,7 +211,10 @@ export function openParent() {
 export async function newWorktreeDraft() {
   const branch = await dialogs.prompt({ title: "New session in a git worktree", description: "Branch name (empty = generated)", placeholder: "feature/…" })
   if (branch === undefined) return
-  setDraft({ ...draft(), worktree: { branch: branch.trim() || undefined } })
+  // Enter on the first row keeps the repository's default base branch.
+  const base = await pickBaseBranch(draft().cwd ?? process.cwd())
+  if (base === undefined) return
+  setDraft({ ...draft(), worktree: { branch: branch.trim() || undefined, base: base || undefined } })
   navigate(undefined)
-  notify(`Next session starts in a new worktree of ${process.cwd()}`)
+  notify(`Next session starts in a new worktree of ${process.cwd()}${base ? ` (from ${base})` : ""}`)
 }

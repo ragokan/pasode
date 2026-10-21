@@ -6,12 +6,13 @@ import { theme } from "../theme"
 import context from "./context/tui"
 import files from "./files/tui"
 import footer from "./footer/tui"
+import git from "./git/tui"
 import mcp from "./mcp/tui"
 import metrics from "./metrics/tui"
 import todo from "./todo/tui"
 
 /** Built-in sections, registered through the plugin slot API like OpenCode's feature plugins so plugins can interleave by order. */
-export const sidebarFeatures = [context, mcp, todo, files, metrics, footer]
+export const sidebarFeatures = [context, mcp, todo, git, files, metrics, footer]
 
 // Same frame as OpenCode's routes/session/sidebar.tsx; sections come from sidebarFeatures and plugins.
 export function Sidebar(props: { agent: PaseoAgent }) {

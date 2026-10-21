@@ -12,6 +12,7 @@ import { Composer, composerOpen, handleComposerKey, registerTerminalCommands, ru
 import { configPath } from "./config"
 import { dialog, DialogHost, dialogs, DialogSelect, type SelectOption } from "./dialog"
 import { footerLayout, liveLabel, usageItems } from "./footer"
+import { ChangesView, registerGit } from "./git"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
 import { configSummary, registerManageCommands, statusDialog } from "./manage"
@@ -133,6 +134,7 @@ export function App(props: { initialAgentId?: string }) {
   registerTabs()
   registerManageCommands()
   installUx(renderer, terminalFocused)
+  registerGit()
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -960,6 +962,7 @@ export function App(props: { initialAgentId?: string }) {
           </box>
         )}
       </Show>
+      <ChangesView />
       <DialogHost />
     </box>
   )
