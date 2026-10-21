@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "bun bin/paseo-tui.ts",
+    "build": "bun script/build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

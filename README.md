@@ -6,6 +6,15 @@ steer here are the same ones the Paseo desktop and mobile apps show, live. Claud
 Built on OpenTUI + Solid (OpenCode's UI stack) and `@getpaseo/client`; much of the UI is ported from
 OpenCode (MIT). Plugins live in [`okan-plugins/`](okan-plugins).
 
+Install a release binary (macOS or Linux, arm64 or x64). It mentions newer releases when it opens; `/update` installs
+one and restarts into the same session.
+
+```sh
+mkdir -p ~/.local/bin && curl -fL "https://github.com/ragokan/pasode/releases/latest/download/pasode-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/').gz" | gunzip > ~/.local/bin/pasode && chmod +x ~/.local/bin/pasode
+```
+
+Or run from source:
+
 ```sh
 bun install
 bun bin/paseo-tui.ts            # home: new session in the current directory
@@ -119,3 +128,13 @@ Plugins import `solid-js` / `@opentui/*` normally; the launcher maps them onto t
 ## Checks
 
 `bun test` and `bun run typecheck`.
+
+## Releasing
+
+Bump `version` in `package.json`, then build every platform's binary and publish them with their checksums:
+
+```sh
+bun install --frozen-lockfile --os='*' --cpu='*'
+bun run build bun-darwin-arm64 bun-darwin-x64 bun-linux-arm64 bun-linux-x64
+gh release create v$(bun -p 'require("./package.json").version') dist/*.gz dist/SHA256SUMS
+```

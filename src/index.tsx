@@ -5,6 +5,7 @@ import { sessionEpilogue } from "./logo"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
 import { rendererOptions } from "./renderer"
 import { agentId, prefs } from "./state"
+import { checkForUpdate, installed, relaunch } from "./update"
 
 const usage = `paseo-tui [-s] [agent-id]
 
@@ -34,7 +35,8 @@ await render(() => <App initialAgentId={arg} />, {
   useMouse: prefs.mouse,
   onDestroy: () => {
     const id = agentId()
-    if (id) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")
-    void disconnect().finally(() => process.exit(0))
+    if (id && !installed) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")
+    void disconnect().finally(() => (installed ? relaunch(id) : process.exit(0)))
   },
 })
+void checkForUpdate()

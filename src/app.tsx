@@ -27,6 +27,7 @@ import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDra
 import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
 import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
+import { update } from "./update"
 
 const home = os.homedir()
 const tilde = (value: string) => value.replace(home, "~")
@@ -118,6 +119,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "app.toggle.animations", title: "Toggle animations", category: "System", run: () => (setPref("animations", !prefs.animations), notify(`Animations: ${prefs.animations ? "on" : "off"}`)) },
     { id: "help.show", title: "Help", category: "System", keybind: "<leader>h", slash: "help", run: openHelp },
     { id: "status.show", title: "Status", category: "System", slash: "status", run: openStatus },
+    { id: "app.update", title: "Update pasode", category: "System", slash: "update", run: () => update(exit).catch(showError) },
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
   ]
   registerCommands(builtins)
