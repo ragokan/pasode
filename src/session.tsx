@@ -583,7 +583,7 @@ function Edit(props: { tool: ToolCallTimelineItem; detail: Extract<ToolCallDetai
         <box paddingLeft={props.transcript ? 1 : 0}>
         <diff
           diff={diff()} view={view()} filetype={filetype(props.detail.filePath)} syntaxStyle={syntax()}
-          width="100%" wrapMode="word" showLineNumbers fg={theme.text}
+          width="100%" wrapMode={prefs.diffWrap} showLineNumbers fg={theme.text}
           addedBg={theme.diffAddedBg} removedBg={theme.diffRemovedBg} contextBg={theme.diffContextBg}
           addedSignColor={theme.diffHighlightAdded} removedSignColor={theme.diffHighlightRemoved}
           lineNumberFg={theme.diffLineNumber} lineNumberBg={theme.diffContextBg}
