@@ -5,7 +5,7 @@
     "": {
       "name": "pasode",
       "dependencies": {
-        "@getpaseo/client": "0.11.2",
+        "@getpaseo/client": "0.12.0",
         "@opentui/core": "0.5.17",
         "@opentui/solid": "0.5.17",
         "solid-js": "1.9.12",
@@ -73,11 +73,11 @@
 
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
-    "@getpaseo/client": ["@getpaseo/client@0.11.2", "", { "dependencies": { "@getpaseo/protocol": "0.11.2", "@getpaseo/relay": "0.11.2", "zod": "^4.4.3" } }, "sha512-F5483GAkhbitCoJi3Xy+RbIS9ja6Hy+NToOl8J3b5bIFhrttO4sofETCW2Q2LVFDTyQq0v24z8ZQpvwuyV/IUg=="],
+    "@getpaseo/client": ["@getpaseo/client@0.12.0", "", { "dependencies": { "@getpaseo/protocol": "0.12.0", "@getpaseo/relay": "0.12.0", "zod": "^4.4.3" } }, "sha512-FrszuQkG73mbU5nJcaWKjW2K1mDt6k1veCa2acV9V8HphPD7BtQLPiiUnXsSUdYeP8S54duGbuYfZgaVyUvd5g=="],
 
-    "@getpaseo/protocol": ["@getpaseo/protocol@0.11.2", "", { "dependencies": { "semver": "^7.8.5", "zod": "^4.4.3" } }, "sha512-C+YZ5aZs+X3ygKJnpL1IZ9MvMcmGz7waPV0UYusaTFg+bPSl2jW2HOEYlxUALucwTnDYwsFgi+rAzKAihHWkXQ=="],
+    "@getpaseo/protocol": ["@getpaseo/protocol@0.12.0", "", { "dependencies": { "semver": "^7.8.5", "zod": "^4.4.3" } }, "sha512-05jivVDeG18jWTpvQZ3yETNxH/AfHpHy9CgnP7O5ZxQLUr3onJIAqaGNzv15dPnGf4fU342UHQBFAE2t2Yc7fQ=="],
 
-    "@getpaseo/relay": ["@getpaseo/relay@0.11.2", "", { "dependencies": { "base64-js": "^1.5.1", "tweetnacl": "^1.0.3", "ws": "^8.14.2" } }, "sha512-eJ6/apJDWGyxdMbCH59DKhY4GcvbqQCFdeKQG3Rmy4jBvAeEuqC0XeuJd5lD5o2PcCeguzH37qeKFasODOpRSw=="],
+    "@getpaseo/relay": ["@getpaseo/relay@0.12.0", "", { "dependencies": { "base64-js": "^1.5.1", "tweetnacl": "^1.0.3", "ws": "^8.14.2" } }, "sha512-ochmc4uIZWlSgMr9aJIEqnyiFrhcW+TjOWxnTYX4LCyiJMvLrhN4DJpZlReAqyWmSgEybjjRBq+7NBH64FIV3A=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
 

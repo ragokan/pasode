@@ -2,7 +2,8 @@
 
 /** Locale.number: 236912 → "236.9K". */
 export function formatTokens(value: number) {
-  if (value >= 1_000_000) return (value / 1_000_000).toFixed(1) + "M"
+  // 999_950 would round to "1000.0K".
+  if (value >= 999_950) return (value / 1_000_000).toFixed(1) + "M"
   if (value >= 1000) return (value / 1000).toFixed(1) + "K"
   return String(value)
 }

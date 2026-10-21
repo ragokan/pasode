@@ -35,7 +35,7 @@ export async function connect() {
   await daemon.connect()
   void loadCatalog()
   void watchWorkspaces().catch(() => {})
-  const list = await api.agents.list({ filter: { includeArchived: false }, page: { limit: 200 }, subscribe: {} })
+  const list = await api.agents.list({ filter: { includeArchived: false, includeBackground: true }, page: { limit: 200 }, subscribe: {} })
   setAgents(reconcile(Object.fromEntries(list.entries.map(({ agent }) => [agent.id, agent]))))
   list.subscription.subscribe({
     snapshot: ({ entries }) => setAgents(reconcile(Object.fromEntries(entries.map(({ agent }) => [agent.id, agent])))),
@@ -64,7 +64,7 @@ export const [workspaceTitles, setWorkspaceTitles] = createStore<Record<string, 
 
 async function watchWorkspaces() {
   const titles = (entries: PaseoWorkspace[]) => reconcile(Object.fromEntries(entries.map((workspace) => [workspace.id, workspace.title ?? null])))
-  const list = await api.workspaces.list({ page: { limit: 200 }, subscribe: {} })
+  const list = await api.workspaces.list({ filter: { includeBackground: true }, page: { limit: 200 }, subscribe: {} })
   setWorkspaceTitles(titles(list.entries))
   list.subscription.subscribe({
     snapshot: ({ entries }) => setWorkspaceTitles(titles(entries)),

@@ -1,8 +1,7 @@
 # OpenCode themes
 
-Assets are copied unchanged from OpenCode v2.0.26 (`packages/tui/src/theme/assets`):
-33 legacy JSON documents and `v2/opencode.json`, which takes precedence over the
-legacy document with the same name. This exposes 33 built-in theme names.
+Only `v2/opencode.json` from OpenCode v2.0.26 (`packages/tui/src/theme/assets`) ships built in; other
+themes load from `~/.config/{opencode,pasode}/themes`.
 
 Legacy hue migration and OKLCH helpers are ported from `packages/theme/src/tui`.
 Resolution follows its mode selection, state expansion, dialog contextualization,

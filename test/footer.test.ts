@@ -5,6 +5,8 @@ test("context usage reads like OpenCode's footer", () => {
   expect(formatTokens(236_912)).toBe("236.9K")
   expect(formatTokens(1_250_000)).toBe("1.3M")
   expect(formatTokens(999)).toBe("999")
+  expect(formatTokens(999_950)).toBe("1.0M")
+  expect(formatTokens(999_949)).toBe("999.9K")
   expect(usageItems({ contextWindowUsedTokens: 236_912, contextWindowMaxTokens: 1_000_000, totalCostUsd: 0 })).toEqual(["236.9K (24%)"])
   expect(usageItems({ contextWindowUsedTokens: 24_743, contextWindowMaxTokens: 1_000_000, totalCostUsd: 0.11 })).toEqual(["24.7K (2%)", "$0.11"])
   expect(usageItems(undefined)).toEqual([])
