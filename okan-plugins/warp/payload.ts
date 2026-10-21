@@ -20,6 +20,14 @@ export const inKaku = (env: Env) => env.TERM_PROGRAM === "Kaku"
 export const SPINNER = "⠲⠰⠴⠤⠦⠆⠖⠒"
 export const SPINNER_MS = 250
 
+const PLUGIN_MAX_PROTOCOL_VERSION = 1
+
+// ocode's negotiateProtocolVersion: speak the older of Warp's advertised protocol version and ours.
+export function negotiateProtocolVersion(env: Env) {
+  const warpVersion = parseInt(env.WARP_CLI_AGENT_PROTOCOL_VERSION || "1", 10)
+  return Number.isNaN(warpVersion) ? PLUGIN_MAX_PROTOCOL_VERSION : Math.min(warpVersion, PLUGIN_MAX_PROTOCOL_VERSION)
+}
+
 /**
  * Warp's rich CLI-agent protocol. Warp only accepts it for a pane it tracks as a known agent, so paseo-tui
  * reports itself as "opencode" and Warp maps the `pasode` command to OpenCode via
@@ -28,7 +36,7 @@ export const SPINNER_MS = 250
 export function richSequence(event: string, agent: { id: string; cwd: string }, extra: Record<string, unknown>, env: Env) {
   if (!inWarp(env) || !env.WARP_CLI_AGENT_PROTOCOL_VERSION) return
   const body = JSON.stringify({
-    v: 1,
+    v: negotiateProtocolVersion(env),
     agent: "opencode",
     event,
     session_id: agent.id,

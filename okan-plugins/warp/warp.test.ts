@@ -1,7 +1,7 @@
 // Provenance: ~/coding/ocode/plugins/warp/tests/{v2,payload,title,notify}.test.ts semantics; Paseo fixtures authored for pasode.
 import { expect, test } from "bun:test"
 import path from "node:path"
-import { formatTitle, richSequence } from "./payload"
+import { formatTitle, negotiateProtocolVersion, richSequence } from "./payload"
 import { createTransitions, type AgentState } from "./transitions"
 
 const agent = (id: string, options: Partial<AgentState> = {}): AgentState => ({
@@ -60,6 +60,14 @@ test("rich events speak as opencode inside Warp only", () => {
   expect(JSON.parse(sequence.slice("\x1b]777;notify;warp://cli-agent;".length, -1))).toEqual({ v: 1, agent: "opencode", event: "stop", session_id: "a", cwd: "/x/project", project: "project", summary: "done\x07" })
   expect(richSequence("stop", { id: "a", cwd: "" }, {}, { TERM_PROGRAM: "WarpTerminal" })).toBeUndefined()
   expect(richSequence("stop", { id: "a", cwd: "" }, {}, { TERM_PROGRAM: "Apple_Terminal", WARP_CLI_AGENT_PROTOCOL_VERSION: "1" })).toBeUndefined()
+})
+
+// ocode's negotiateProtocolVersion semantics: speak the older of Warp's protocol version and ours (1).
+test.each([[undefined, 1], ["1", 1], ["99", 1], ["0", 0], ["not-a-number", 1]] as const)("Warp advertising protocol %p → payload v%p", (advertised, spoken) => {
+  expect(negotiateProtocolVersion({ WARP_CLI_AGENT_PROTOCOL_VERSION: advertised })).toBe(spoken)
+  if (!advertised) return // richSequence stays silent without a version
+  const sequence = richSequence("stop", { id: "a", cwd: "/p" }, {}, { TERM_PROGRAM: "WarpTerminal", WARP_CLI_AGENT_PROTOCOL_VERSION: advertised })!
+  expect(JSON.parse(sequence.slice("\x1b]777;notify;warp://cli-agent;".length, -1)).v).toBe(spoken)
 })
 
 test("a delayed stop never carries another session's transcript; off-screen sessions stay silent; titles follow sessionTitle", () => {
