@@ -1,10 +1,12 @@
-import { KeyEvent } from "@opentui/core"
+import { renderTerminalSnapshotToAnsi } from "@getpaseo/protocol/terminal-snapshot"
+import { KeyEvent, StdinParser } from "@opentui/core"
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, spyOn, test } from "bun:test"
 import { createRoot } from "solid-js"
 import { Composer, composerOpen, handleComposerKey, registerTerminalCommands, runShell, runningSubagents, subagents, terminals, toggleComposer, useSubagentFeed, useTerminalFeed } from "../src/composer"
 import { runCommand } from "../src/commands"
+import { config } from "../src/config"
 import { dialog, DialogHost } from "../src/dialog"
 import { daemon, openSubagentTimeline, setAgents, setCatalog, timeline, type PaseoAgent } from "../src/paseo"
 import { agentId, setAgentId } from "../src/state"
@@ -240,6 +242,13 @@ test("`!command` runs in a terminal that outlives the command, opens its output,
   expect(capture).toHaveBeenCalledTimes(2) // a burst is one capture
   expect(screen.captureCharFrame()).toContain("second")
   expect(interval).not.toHaveBeenCalled()
+  // Output from before the stream attached (or while it was down) is only in the next capture.
+  output = ["first", "second", "third", "[exit 0]"]
+  stream.snapshot({ error: null, slot: 1 })
+  await tick(150)
+  await screen.renderOnce()
+  expect(capture).toHaveBeenCalledTimes(3)
+  expect(screen.captureCharFrame()).toContain("third")
   dialog.clear()
   expect(stream.state.released).toBe(1)
   dispose()
@@ -338,4 +347,68 @@ test("a shell that exits closes the pane; with no shell, <leader>o creates one",
   expect(paneFocused()).toBe(false)
   expect(stream.state.released).toBe(1)
   dispose()
+})
+
+/** A pane on a fake shell: returns the pane's pieces so tests can drive the stream and read the keys it sends. */
+async function openPane() {
+  setAgents({ a: agent("a", "idle") })
+  setAgentId("a")
+  const list = fakeFeed()
+  spy(spyOn(daemon, "observeTerminals")).mockReturnValue(list.feed)
+  const dispose = createRoot((dispose) => (useTerminalFeed(), registerTerminalCommands(), dispose))
+  list.snapshot({ cwd: "/tmp/x", terminals: [{ id: "sh1", name: "pasode" }] })
+  let receive: (event: unknown) => void = () => {}
+  spy(spyOn(daemon, "observeTerminal")).mockImplementation(((_: string, callback: typeof receive) => ((receive = callback), fakeFeed().feed)) as never)
+  const input = spy(spyOn(daemon, "sendTerminalInput")).mockImplementation(() => {})
+  screen = await testRender(() => <Composer />, { width: 80, height: 30 })
+  runCommand("terminal.toggle")
+  await tick()
+  await screen.renderOnce()
+  await screen.renderOnce()
+  const sent = () => input.mock.calls.filter(([, message]) => message.type === "input").map(([, message]) => (message as { data: string }).data)
+  return { dispose, input, sent, receive: (event: unknown) => receive(event) }
+}
+
+test("a replayed restore replaces the screen instead of drawing over the old one", async () => {
+  const pane = await openPane()
+  const { rows, cols } = pane.input.mock.calls.find(([, message]) => message.type === "resize")![1] as { rows: number; cols: number }
+  // The daemon's real restore frame for a screen whose first row reads `text`.
+  const restore = (text: string) =>
+    Buffer.from(renderTerminalSnapshotToAnsi({ cols, rows, scrollback: [], grid: Array.from({ length: rows }, (_, row) => (row ? [] : Array.from(text, (char) => ({ char })))), cursor: { row: 0, col: text.length, hidden: false } } as never))
+  pane.receive({ type: "restore", terminalId: "sh1", subscriptionId: "s", data: restore("OLDLONG") })
+  await screen!.renderOnce()
+  expect(screen!.captureCharFrame()).toContain("┃ OLDLONG")
+  pane.receive({ type: "restore", terminalId: "sh1", subscriptionId: "s", data: restore("NEW") }) // a reconnect
+  await screen!.renderOnce()
+  expect(screen!.captureCharFrame()).toContain("┃ NEW")
+  expect(screen!.captureCharFrame()).not.toContain("OLD")
+  pane.dispose()
+})
+
+test("a remapped terminal.toggle still reaches the keymap while the pane has focus, so it can release", async () => {
+  const pane = await openPane()
+  const ctrlO = press("o", true, "\x0f")
+  const previous = config.keybinds
+  try {
+    expect(handleComposerKey(ctrlO)).toBe(true) // default <leader>o: ctrl+o is the shell's
+    expect(pane.sent()).toEqual(["\x0f"])
+    config.keybinds = { ...previous, "terminal.toggle": "ctrl+o" }
+    expect(handleComposerKey(ctrlO)).toBe(false)
+    expect(handleComposerKey(press("x", true, "\x18"))).toBe(false) // the leader still is
+    expect(pane.sent()).toEqual(["\x0f"])
+    expect(handleComposerKey(press("a"))).toBe(true)
+  } finally {
+    config.keybinds = previous
+  }
+  pane.dispose()
+})
+
+test("typed text and Enter in one stdin chunk reach the shell as they were typed", async () => {
+  const pane = await openPane()
+  const parser = new StdinParser()
+  parser.push(Buffer.from("echo x\r\x1b[Ay\r")) // tmux send-keys -l 'echo x⏎↑y⏎' without a pause
+  parser.drain((event) => event.type === "key" && handleComposerKey(new KeyEvent(event.key)))
+  expect(pane.sent().join("")).toBe("echo x\r\x1b[Ay\r")
+  expect(pane.sent().filter((data) => data === "\r")).toHaveLength(2)
+  pane.dispose()
 })

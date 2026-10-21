@@ -308,7 +308,8 @@ function ShellOutput(props: { id: string }) {
   const schedule = () => (refresh ??= setTimeout(() => ((refresh = undefined), load()), 100))
   void load()
   const stream = daemon.observeTerminal(props.id, schedule, { restore: { mode: "live" } })
-  stream.subscribe({ snapshot() {}, update: (message) => message.type === "terminal_stream_exit" && schedule() })
+  // Attached (or back after a reconnect): whatever printed before that wasn't streamed to us.
+  stream.subscribe({ snapshot: schedule, update: (message) => message.type === "terminal_stream_exit" && schedule() })
   onCleanup(() => {
     clearTimeout(refresh)
     void stream.release().catch(() => {})
