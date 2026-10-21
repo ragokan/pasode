@@ -1,10 +1,11 @@
 // Paseo terminals in the session directory: the live list, and an interactive pane that renders the daemon's raw
 // stream in OpenTUI's embedded terminal (after OpenCode's component/terminal-pane.tsx, MIT; Paseo-native: the shell runs on the daemon).
+import type { TerminalStreamEvent } from "@getpaseo/client/internal/daemon-client"
 import { EmbeddedTerminalRenderable, TextAttributes, type KeyEvent, type RGBA } from "@opentui/core"
 import { extend, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
-import { commands, keybindLabel, leader, registerCommands } from "./commands"
+import { commands, keybindLabel, keybindOf, leader, registerCommands } from "./commands"
 import { dialog } from "./dialog"
 import { matchStroke, parseBinding } from "./keys"
 import { daemon } from "./paseo"
@@ -92,9 +93,16 @@ export function registerTerminalCommands() {
 
 const leaderStroke = parseBinding(leader)[0]?.[0]
 
-/** While the pane has focus every key goes to the shell, except the leader so `<leader>o` still reaches the keymap. */
+/** The strokes the app's keymap keeps while the pane has focus: the leader, and whatever starts the (maybe remapped) toggle binding, so it can always release. */
+function reserved(key: KeyEvent) {
+  const toggle = commands().find((command) => command.id === "terminal.toggle")
+  const strokes = [leaderStroke, ...(toggle ? parseBinding(keybindOf(toggle), leader).map((sequence) => sequence[0]) : [])]
+  return strokes.some((stroke) => stroke && matchStroke(stroke, key))
+}
+
+/** While the pane has focus every key goes to the shell, except the reserved ones. */
 export function handleTerminalKey(key: KeyEvent) {
-  if (!paneFocused() || !term || (leaderStroke && matchStroke(leaderStroke, key))) return false
+  if (!paneFocused() || !term || reserved(key)) return false
   term.handleKeyPress(key)
   return true
 }
@@ -115,12 +123,18 @@ function Pane(props: { id: string }) {
     return command && keybindLabel(command)
   }
 
+  // A restore is the whole screen again (first attach, reconnect): clear what the emulator holds, or the two overlap.
+  const receive = (event: TerminalStreamEvent) => {
+    if (event.type === "snapshot") return
+    if (event.type === "restore") term?.write(`\x1bc${defaultColors()}`)
+    term?.write(event.data)
+  }
   // Our size wins on the PTY (as in the Paseo app), so the stream's screen and our emulator agree.
   const claim = (cols: number, rows: number) => daemon.sendTerminalInput(props.id, { type: "resize", rows, cols, intent: "claim" })
   function resized(cols: number, rows: number) {
     claim(cols, rows)
     if (stream) return
-    stream = daemon.observeTerminal(props.id, (event) => event.type !== "snapshot" && term?.write(event.data), {
+    stream = daemon.observeTerminal(props.id, receive, {
       restore: { mode: "visible-snapshot", scrollbackLines: 200, size: { rows, cols } },
     })
     stream.subscribe({ snapshot() {}, update: (message) => message.type === "terminal_stream_exit" && closePane() })
@@ -128,7 +142,8 @@ function Pane(props: { id: string }) {
   }
 
   // Default colors follow the theme; the cells' own colors come from the shell.
-  createEffect(() => term?.write(`\x1b]10;${hex(theme.text)}\x1b\\`))
+  const defaultColors = () => `\x1b]10;${hex(theme.text)}\x1b\\`
+  createEffect(() => term?.write(defaultColors()))
   // Something else needs the keyboard: a dialog, or a permission request on the session.
   createEffect(() => (dialog.isOpen || current()?.pendingPermissions?.length) && paneFocused() && term?.blur())
   onMount(() => term?.focus())
