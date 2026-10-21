@@ -146,30 +146,41 @@ const [undoRevision, setUndoRevision] = createSignal(0)
 
 type UserRow = Extract<AgentTimelineItem, { type: "user_message" }>
 
+/** A user message as it was when chosen. Refetches rewrite loaded rows in place, so later steps trust only these plain values. */
+export type Chosen = { agentId: string; messageId?: string; text: string }
+
+export const chooseMessage = (row: UserRow): Chosen | undefined => (timeline.agentId ? { agentId: timeline.agentId, messageId: row.messageId, text: row.text } : undefined)
+
+/** Where the chosen message sits in the open timeline now (-1: another session is open, or it's gone). */
+export const locateMessage = (chosen: Chosen) =>
+  timeline.agentId === chosen.agentId ? timeline.rows.findLastIndex((row) => row.type === "user_message" && row.messageId === chosen.messageId && row.text === chosen.text) : -1
+
+export const gone = () => notify("That message is no longer in the session", "warning")
+
 /** Rewinding takes the provider's own support: Claude conversation + files, Codex conversation only. */
 const rewindMode = (agent: PaseoAgent) => (agent.capabilities?.supportsRewindBoth ? "both" : agent.capabilities?.supportsRewindConversation ? "conversation" : undefined)
 
-/** Why rewinding to `row` isn't possible, if it isn't. */
-export function revertBlocker(agent: PaseoAgent, row: UserRow) {
+/** Why rewinding to this message isn't possible, if it isn't. */
+export function revertBlocker(agent: PaseoAgent, message: { messageId?: string }) {
   if (!rewindMode(agent)) return `${agent.provider} sessions can't rewind`
-  if (!row.messageId) return "The provider hasn't acknowledged this message yet"
+  if (!message.messageId) return "The provider hasn't acknowledged this message yet"
 }
 
-/** Rewinds to before the loaded user message at `index` (and its file edits where the provider can); its text goes back to the prompt. */
-async function rewindTo(agent: PaseoAgent, index: number, restore: (text: string) => void) {
-  const target = timeline.rows[index]
-  if (target?.type !== "user_message") return
-  const blocker = revertBlocker(agent, target)
+/** Rewinds to before the chosen message (and its file edits where the provider can); its text goes back to the prompt. */
+async function rewindTo(agent: PaseoAgent, chosen: Chosen, restore: (text: string) => void) {
+  const index = locateMessage(chosen)
+  if (index < 0 || agent.id !== chosen.agentId || current()?.id !== agent.id) return gone()
+  const blocker = revertBlocker(agent, chosen)
   if (blocker) return notify(blocker, "warning")
   const mode = rewindMode(agent)!
   // Read before rewinding: the daemon's replacement reloads the timeline under us.
   const texts = timeline.rows.slice(index).flatMap((row) => (row.type === "user_message" ? [row.text] : []))
-  const result = await daemon.rewindAgent(agent.id, target.messageId!, mode).catch((error) => ({ ok: false, error: String(error) }))
+  const result = await daemon.rewindAgent(agent.id, chosen.messageId!, mode).catch((error) => ({ ok: false, error: String(error) }))
   if (!result.ok) return showError(result.error ?? "Rewind failed")
   // Newest last, so redo resends the earliest undone message first.
   undone.set(agent.id, [...(undone.get(agent.id) ?? []), ...texts.toReversed()])
   setUndoRevision((value) => value + 1)
-  restore(target.text)
+  restore(chosen.text)
   const what = texts.length === 1 ? "the last message" : `${texts.length} messages`
   notify(mode === "both" ? `Undid ${what} and ${texts.length === 1 ? "its" : "their"} file changes` : `Undid ${what} (files unchanged)`, "success")
 }
@@ -177,22 +188,22 @@ async function rewindTo(agent: PaseoAgent, index: number, restore: (text: string
 /** OpenCode's undo: rewind to before the last user message, text back in the prompt. */
 export async function undo(restore: (text: string) => void) {
   const agent = current()
+  const row = timeline.rows.findLast((item): item is UserRow => item.type === "user_message" && !!item.messageId)
   if (!agent) return
-  const index = timeline.rows.findLastIndex((row) => row.type === "user_message" && row.messageId)
-  if (index < 0) return notify("Nothing to undo", "warning")
-  await rewindTo(agent, index, restore)
+  if (!row) return notify("Nothing to undo", "warning")
+  await rewindTo(agent, chooseMessage(row)!, restore)
 }
 
 /** OpenCode's message-actions Revert: everything from that user message on goes, after a confirmation (it can roll files back). */
-export async function revertTo(row: UserRow, restore: (text: string) => void) {
+export async function revertTo(chosen: Chosen, restore: (text: string) => void) {
   const agent = current()
-  const index = timeline.rows.indexOf(row)
-  if (!agent || index < 0) return notify("That message is no longer loaded", "warning")
+  const index = locateMessage(chosen)
+  if (!agent || agent.id !== chosen.agentId || index < 0) return gone()
   const count = timeline.rows.slice(index).filter((item) => item.type === "user_message").length
   const files = rewindMode(agent) === "both" ? " and roll back their file edits" : ""
   const ok = await dialogs.confirm("Revert to here", `Rewind ${count} message${count === 1 ? "" : "s"}${files}? Paseo can't restore the replies afterwards.`, "Revert")
-  // The session may have changed while the confirmation was up.
-  if (ok && current()?.id === agent.id) await rewindTo(agent, timeline.rows.indexOf(row), restore)
+  // The session or its rows may have changed while the confirmation was up: rewindTo finds the message again, or stops.
+  if (ok && current()?.id === agent.id) await rewindTo(agent, chosen, restore)
 }
 
 export const canRedo = () => (undoRevision(), !!undone.get(current()?.id ?? "")?.length)
@@ -212,11 +223,13 @@ export async function redo() {
  * The cursor of the last row before a user message (null: it's the first). The daemon takes only assistant message ids
  * as fork boundaries, so stopping before a prompt means finding its timeline position and the row ahead of it.
  */
-async function cursorBefore(agentId: string, index: number) {
-  const { epoch, prompts } = await daemon.listAgentTimelinePrompts(agentId)
+async function cursorBefore(chosen: Chosen) {
+  const { epoch, prompts } = await daemon.listAgentTimelinePrompts(chosen.agentId)
+  const index = locateMessage(chosen)
+  if (index < 0) throw new Error("That message is no longer in the session")
   const prompt = locatePrompt(prompts, timeline.rows, timeline.times, index)
   if (!prompt) throw new Error("The daemon doesn't know that message")
-  const page = await daemon.fetchAgentTimeline(agentId, { direction: "before", cursor: { epoch, seq: prompt.seq }, limit: 1, projection: "projected" })
+  const page = await daemon.fetchAgentTimeline(chosen.agentId, { direction: "before", cursor: { epoch, seq: prompt.seq }, limit: 1, projection: "projected" })
   if (page.reset) throw new Error("History changed; try again")
   const last = page.entries.at(-1)
   return last ? { epoch: page.epoch, seq: last.seqEnd } : null
@@ -226,16 +239,16 @@ async function cursorBefore(agentId: string, index: number) {
  * Like the Paseo app's fork: carry a chat-history summary into a new session; the next prompt starts it. From a user
  * message (OpenCode's Fork), the history stops before it and the message goes back in the prompt.
  */
-export async function fork(from?: { row: UserRow; restore: (text: string) => void }) {
+export async function fork(from?: { chosen: Chosen; restore: (text: string) => void }) {
   const agent = current()
   if (!agent) return
-  const index = from ? timeline.rows.indexOf(from.row) : -1
-  if (from && index < 0) return notify("That message is no longer loaded", "warning")
+  if (from && locateMessage(from.chosen) < 0) return gone()
   try {
-    const boundaryCursor = from ? await cursorBefore(agent.id, index) : undefined
+    const boundaryCursor = from ? await cursorBefore(from.chosen) : undefined
     // Nothing precedes the first message: a plain new session in the same directory.
     const context = boundaryCursor === null ? undefined : await daemon.buildAgentForkContext(agent.id, boundaryCursor ? { boundaryCursor } : undefined)
     if (boundaryCursor !== null && !context?.attachment) throw new Error("Fork failed")
+    if (current()?.id !== agent.id) return
     const title = sessionTitle(agent) || "Untitled"
     setDraft({
       provider: agent.provider,
@@ -246,7 +259,7 @@ export async function fork(from?: { row: UserRow; restore: (text: string) => voi
       fork: context?.attachment ? { title, cwd: agent.cwd, attachment: context.attachment } : undefined,
     })
     navigate(undefined)
-    from?.restore(from.row.text)
+    from?.restore(from.chosen.text)
     notify(`Forking "${title}" — your next message starts the new session`)
   } catch (error) {
     showError(error)

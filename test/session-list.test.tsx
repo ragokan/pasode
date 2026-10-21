@@ -1,7 +1,6 @@
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, spyOn, test } from "bun:test"
 import { reconcile } from "solid-js/store"
-import { registerCommands, commands } from "../src/commands"
 import { dialog, DialogHost } from "../src/dialog"
 import { agents, api, daemon, openTimeline, setAgents, setWorkspacePins, type PaseoAgent } from "../src/paseo"
 import { rendererOptions } from "../src/renderer"
@@ -69,10 +68,11 @@ test("pinned sessions sort into a Pinned category on top, and ctrl+f pins and un
   expect(pinned.mock.calls).toEqual([["w-old", false]])
   expect(screen.captureCharFrame()).not.toContain("Pinned")
 
-  // The cursor keeps its row number while the list reorders, so it now sits on the newest session.
+  // The list reorders under the cursor; the selection stays on the same session, so the next press pins it again.
+  expect(screen.captureCharFrame()).toContain("pin ctrl+f")
   screen.mockInput.pressKey("f", { ctrl: true })
   await settle()
-  expect(pinned.mock.calls.at(-1)).toEqual(["w-new", true])
+  expect(pinned.mock.calls).toEqual([["w-old", false], ["w-old", true]])
   expect(screen.captureCharFrame()).toContain("Pinned")
 })
 
@@ -123,15 +123,37 @@ test("/resume lists sessions started outside Paseo and imports the chosen one, t
 })
 
 test("the slash aliases and small commands are registered", () => {
-  const unregister = registerCommands(sessionCommands({ scrollToRow: () => {} }))
-  try {
-    const slashes = Object.fromEntries(commands().filter((command) => command.slash).map((command) => [command.slash, command.id]))
-    expect(slashes).toMatchObject({ resume: "session.import", import: "session.import.alias", continue: "session.list.continue", quit: "app.exit.quit", effort: "variant.list.effort", "copy-id": "session.copy.id" })
-    expect(Object.fromEntries(commands().filter((command) => command.id.startsWith("session.child.")).map((command) => [command.id, command.keybind]))).toEqual({
-      "session.child.next": "<leader>right",
-      "session.child.previous": "<leader>left",
-    })
-  } finally {
-    unregister()
-  }
+  const list = sessionCommands({ scrollToRow: () => {} })
+  const slashes = Object.fromEntries(list.filter((command) => command.slash).map((command) => [command.slash, command.id]))
+  expect(slashes).toMatchObject({ resume: "session.import", import: "session.import.alias", continue: "session.list.continue", quit: "app.exit.quit", effort: "variant.list.effort", "copy-id": "session.copy.id" })
+  expect(Object.fromEntries(list.filter((command) => command.id.startsWith("session.child.")).map((command) => [command.id, command.keybind]))).toEqual({
+    "session.child.next": "<leader>right",
+    "session.child.previous": "<leader>left",
+  })
+})
+
+test("history opens from an empty live list, and the way back works from an empty history", async () => {
+  const history = spyOn(daemon, "fetchAgentHistory").mockResolvedValue({ entries: [], pageInfo: { nextCursor: null, prevCursor: null, hasMore: false } } as never)
+  const { screen, settle } = await show(() => <SessionList />, [history])
+  expect(screen.captureCharFrame()).toContain("No sessions on the daemon yet")
+  screen.mockInput.pressTab()
+  await settle()
+  expect(screen.captureCharFrame()).toContain("Session history")
+  screen.mockInput.pressTab()
+  await settle()
+  expect(screen.captureCharFrame()).toContain("No sessions on the daemon yet")
+  expect(screen.captureCharFrame()).not.toContain("Session history")
+})
+
+test("opening a history result the live list doesn't hold yet still selects it as the current session", async () => {
+  setAgents(reconcile({ live: agent("live", "w1", "A live session", "2026-01-03T00:00:00Z") }))
+  const beyond = agent("beyond", "w3", "Older than the live snapshot", "2025-12-01T00:00:00Z") // not archived
+  const history = spyOn(daemon, "fetchAgentHistory").mockResolvedValue({ entries: [{ agent: beyond }], pageInfo: { nextCursor: null, prevCursor: null, hasMore: false } } as never)
+  const { screen, settle } = await show(() => <SessionList />, [history])
+  screen.mockInput.pressTab()
+  await settle()
+  screen.mockInput.pressEnter()
+  await settle()
+  expect(agentId()).toBe("beyond")
+  expect(agents.beyond?.title).toBe("Older than the live snapshot")
 })
