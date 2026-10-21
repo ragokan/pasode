@@ -1,17 +1,29 @@
 import { decodePasteBytes, TextAttributes, type KeyEvent, type TextareaRenderable } from "@opentui/core"
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import path from "node:path"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { runCommand } from "../commands"
 import { truncate } from "../dialog"
 import { offsetWidth, slashTrigger } from "./slash"
 import { SplitBorder } from "../session"
 import { theme } from "../theme"
 import { readClipboard } from "./clipboard"
+import { saveDraft, takeDraft } from "./drafts"
 import { editPrompt } from "./editor"
+import { promptHistory } from "./history"
+import { mentionTrigger, quoteMention } from "./mention"
 import { PromptMetadata, takeWidth } from "./metadata"
+import { expandPasted, summarizePaste, type Pasted } from "./paste"
+import { QueueDock } from "./queue"
 import { PromptSpinner } from "./spinner"
-import type { PromptProps, PromptRef, PromptSubmit, SlashItem } from "./types"
+import type { PromptProps, PromptRef, PromptSnapshot, PromptSubmit, SlashItem } from "./types"
 
-export type { PromptProps, PromptRef, PromptSubmit, SlashItem } from "./types"
+export type { PromptProps, PromptRef, PromptSnapshot, PromptSubmit, SlashItem } from "./types"
+
+/** A row of the completion popup: a "/" command or skill, or an "@" path. */
+type Option = { label: string; description?: string; run: () => void }
+/** Commands that act on the text around them, so they're offered mid-draft too (like skills): "/stash" shelves what you typed. */
+const inlineCommands = new Set(["stash"])
 
 // OpenCode v2.0.26 routes/home.tsx (MIT), selected once per prompt mount.
 const examples = ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"]
@@ -29,6 +41,10 @@ export function Prompt(props: PromptProps) {
   let editing = false
   let pasteQueue = Promise.resolve()
   let generation = 0
+  // What the "[Pasted ~N lines]" tokens in the input stand for.
+  let pasted: Pasted[] = []
+  // The session whose draft is in the input (see the sessionId effect below).
+  let owned: { id: string | undefined } | undefined
   const [text, setTextSignal] = createSignal("")
   const [prefix, setPrefix] = createSignal("")
   const [images, setImages] = createSignal<PromptSubmit["images"]>([])
@@ -46,6 +62,24 @@ export function Prompt(props: PromptProps) {
   const [dismissed, setDismissed] = createSignal<string>()
   const report = (error: unknown) => { if (!disposed) setError(error instanceof Error ? error.message : String(error)) }
 
+  const current = () => (input && !input.isDestroyed ? input.plainText : text())
+
+  /** Tokens whose text was edited away are dropped. */
+  function snapshot(): PromptSnapshot {
+    const value = current()
+    return { text: value, pasted: pasted.filter((part) => value.includes(part.token)), images: images() }
+  }
+
+  function restore(next: PromptSnapshot, cursor?: number) {
+    generation++ // a paste still reading the clipboard belongs to the old prompt
+    pasted = next.pasted
+    setText(next.text)
+    setImages(next.images)
+    setError(undefined)
+    if (cursor !== undefined && input) input.cursorOffset = Math.min(cursor, offsetWidth(next.text))
+    sync()
+  }
+
   function sync() {
     if (!input || disposed) return
     setTextSignal(input.plainText)
@@ -61,21 +95,45 @@ export function Prompt(props: PromptProps) {
 
   function clear() {
     generation++
+    pasted = []
     setText("")
     setImages([])
     setError(undefined)
   }
 
   const slash = createMemo(() => slashTrigger(prefix()))
+  const mention = createMemo(() => (slash() ? undefined : mentionTrigger(prefix())))
   const completionKey = () => `${text()}:${prefix().length}`
-  const options = createMemo<SlashItem[]>(() => {
+  const slashOptions = createMemo<Option[]>(() => {
     if (!props.focused || dismissed() === completionKey()) return []
     const trigger = slash()
     if (!trigger) return []
-    // Past the start of the prompt only skills can be mentioned; commands there would be plain text.
-    const items = trigger.index === 0 ? props.slashItems : props.slashItems.filter((item) => item.mention)
-    return items.filter((item) => item.name.toLowerCase().startsWith(trigger.query.toLowerCase())).slice(0, 8)
+    // Past the start of the prompt only skills (and inline commands) can be used; other commands there would be plain text.
+    const items = trigger.index === 0 ? props.slashItems : props.slashItems.filter((item) => item.mention || inlineCommands.has(item.name))
+    return items
+      .filter((item) => item.name.toLowerCase().startsWith(trigger.query.toLowerCase()))
+      .slice(0, 8)
+      .map((item) => ({ label: trigger.index > 0 && item.mention ? item.mention : `/${item.name}`, description: item.description, run: () => pick(item) }))
   })
+  // "@" paths from the daemon for the typed query, debounced like the Paseo app; the last answer stays up while the next loads.
+  const [files, setFiles] = createSignal<{ path: string; kind: "file" | "directory" }[]>([])
+  createEffect(() => {
+    const query = props.focused && props.suggestFiles ? mention()?.query : undefined
+    void props.cwd
+    if (query === undefined) return setFiles([])
+    const timer = setTimeout(() => {
+      props.suggestFiles!(query).then((found) => !disposed && mention()?.query === query && setFiles(found), () => setFiles([]))
+    }, 180)
+    onCleanup(() => clearTimeout(timer))
+  })
+  const fileOptions = createMemo<Option[]>(() => {
+    if (!props.focused || dismissed() === completionKey() || !mention()) return []
+    return files().slice(0, 8).map((file) => {
+      const dir = path.dirname(file.path)
+      return { label: path.basename(file.path) + (file.kind === "directory" ? "/" : ""), description: dir === "." ? "" : dir, run: () => pickFile(file.path) }
+    })
+  })
+  const options = () => (slashOptions().length ? slashOptions() : fileOptions())
   createEffect(on(() => `${completionKey()}:${props.cwd}`, () => setSelected(0)))
   createEffect(() => {
     if (selected() >= options().length) setSelected(0)
@@ -93,15 +151,51 @@ export function Prompt(props: PromptProps) {
     item.run?.()
   }
 
+  // Replaces "@query" with the quoted path, like the Paseo app.
+  function pickFile(file: string) {
+    const trigger = mention()
+    if (!trigger || !props.focused || !input) return
+    const before = prefix().slice(0, trigger.index) + quoteMention(file)
+    input.setText(before + input.plainText.slice(prefix().length))
+    input.cursorOffset = offsetWidth(before)
+    sync()
+  }
+
   function paste(pastedText?: string) {
     const currentGeneration = generation
     pasteQueue = pasteQueue.then(async () => {
       const content = await readClipboard(pastedText, props.cwd)
       if (disposed || generation !== currentGeneration) return
       if ("image" in content) setImages((list) => [...list, { ...content.image }])
-      else if ("text" in content) input?.insertText(content.text.replace(/\r\n?/g, "\n"))
+      else if ("text" in content) {
+        const normalized = content.text.replace(/\r\n?/g, "\n")
+        const part = summarizePaste(normalized, pasted)
+        if (part) pasted.push(part)
+        input?.insertText(part ? part.token + " " : normalized)
+      }
       sync()
     }).catch(report)
+  }
+
+  // OpenCode's prompt.history.previous/next: ↑ at the very start (↓ at the very end) steps through submitted prompts;
+  // elsewhere the arrows move the cursor, first to the edge. Returns false at the ends, so ↓ still opens the composer.
+  function walkHistory(direction: 1 | -1) {
+    if (!input) return false
+    const edge = direction < 0 ? 0 : offsetWidth(input.plainText)
+    if (input.cursorOffset !== edge) {
+      const row = input.scrollY + input.visualCursor.visualRow
+      if (row === (direction < 0 ? 0 : Math.max(0, input.editorView.getTotalVirtualLineCount() - 1))) input.cursorOffset = edge
+      else if (direction < 0) input.moveCursorUp()
+      else input.moveCursorDown()
+      return true
+    }
+    const entry = promptHistory.move(direction, input.plainText)
+    if (!entry) return false
+    pasted = entry.pasted
+    input.setText(entry.text)
+    input.cursorOffset = direction < 0 ? 0 : offsetWidth(entry.text)
+    sync()
+    return true
   }
 
   function handleKey(key: KeyEvent): boolean {
@@ -113,11 +207,12 @@ export function Prompt(props: PromptProps) {
         if (list.length) {
           if (!key.shift && key.name === "up") return setSelected((i) => (i - 1 + list.length) % list.length), true
           if (!key.shift && key.name === "down") return setSelected((i) => (i + 1) % list.length), true
-          if (!key.shift && (key.name === "tab" || key.name === "return")) return pick(list[selected()]), true
+          if (!key.shift && (key.name === "tab" || key.name === "return")) return list[selected()]?.run(), true
           if (key.name === "escape") return setDismissed(completionKey()), true
         }
         if (!key.shift && key.name === "backspace" && !(input?.plainText ?? text()).length && images().length)
           return setImages((list) => list.slice(0, -1)), true
+        if (!key.shift && (key.name === "up" || key.name === "down")) return walkHistory(key.name === "up" ? -1 : 1)
       }
       return false
     })()
@@ -131,26 +226,43 @@ export function Prompt(props: PromptProps) {
     paste(decodePasteBytes(event.bytes))
   })
 
-  async function submit() {
+  async function submit(delivery?: "queue") {
     if (!props.focused || submitting || editing || disposed) return
     submitting = true
+    const started = owned
+    let sent: PromptSnapshot | undefined
     try {
       await pasteQueue
       if (disposed) return
-      const original = input?.plainText ?? text()
-      const attached = images()
-      const value: PromptSubmit = { text: original, images: attached }
+      sent = snapshot()
+      const attached = sent.images
+      const value: PromptSubmit = { text: expandPasted(sent.text, sent.pasted), images: attached }
       if (!value.text.trim() && !value.images.length) return
       setError(undefined)
-      await props.onSubmit(value)
-      // Do not discard edits or new images that arrived while the host was sending.
-      if (!disposed && (input?.plainText ?? text()) === original && images() === attached) clear()
+      await props.onSubmit(value, { queue: delivery === "queue" })
+      if (value.text.trim()) promptHistory.append({ text: sent.text, pasted: sent.pasted })
+      // Do not discard edits or new images that arrived while the host was sending (or a draft of another session).
+      if (!disposed && owned === started && current() === sent.text && images() === attached) clear()
     } catch (error) {
-      report(error)
+      // Another session's draft is showing by now: the failed one goes back to its own.
+      if (sent && started && owned !== started) saveDraft(started.id, { ...sent, cursor: offsetWidth(sent.text) })
+      else report(error)
     } finally {
       submitting = false
     }
   }
+
+  // One draft per session (the home screen is undefined): leaving one saves it, entering restores it. A prompt being
+  // sent isn't saved, so the home prompt that unmounts when its first message opens a session doesn't leave a copy.
+  function leave() {
+    if (owned && !submitting && !renderer.isDestroyed) saveDraft(owned.id, { ...snapshot(), cursor: offsetWidth(prefix()) })
+  }
+  createEffect(on(() => props.sessionId, (id) => {
+    leave()
+    owned = { id }
+    const draft = takeDraft(id)
+    restore(draft ?? { text: "", pasted: [], images: [] }, draft?.cursor)
+  }))
 
   // OpenCode's prompt reclaims focus whenever nothing covers it (e.g. after a dialog or a remount).
   createEffect(() => {
@@ -159,17 +271,21 @@ export function Prompt(props: PromptProps) {
 
   const api: PromptRef = {
     text: () => input?.plainText ?? text(),
-    setText: (value) => { generation++; setText(value) },
+    setText: (value) => { generation++; pasted = []; setText(value) },
     clear,
     focus: () => { if (props.focused && !disposed) input?.focus() },
     isEmpty: () => !(input?.plainText ?? text()).length && !images().length,
+    snapshot,
+    restore,
+    submit,
     handleKey,
     async openEditor() {
       if (editing || disposed) return
       editing = true
       try {
         await pasteQueue
-        const value = await editPrompt(api.text(), props.cwd, renderer)
+        const snap = snapshot()
+        const value = await editPrompt(expandPasted(snap.text, snap.pasted), props.cwd, renderer)
         if (!disposed) api.setText(value)
       } finally {
         editing = false
@@ -177,19 +293,20 @@ export function Prompt(props: PromptProps) {
     },
   }
   onMount(() => props.ref?.(api))
-  onCleanup(() => { disposed = true; props.ref?.(undefined) })
+  onCleanup(() => { leave(); disposed = true; props.ref?.(undefined) })
 
   return (
     <box flexShrink={0} width="100%">
+      <QueueDock sessionId={props.sessionId} onOpen={() => runCommand("prompt.queue.list")} />
       <Show when={options().length}>
         <box backgroundColor={theme.backgroundPanel} paddingTop={1} paddingBottom={1} flexShrink={0}>
           <For each={options()}>
             {(item, index) => {
               const active = () => index() === selected()
               return (
-                <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2} backgroundColor={active() ? theme.primary : theme.backgroundPanel} onMouseUp={() => pick(item)}>
+                <box flexDirection="row" gap={1} paddingLeft={2} paddingRight={2} backgroundColor={active() ? theme.primary : theme.backgroundPanel} onMouseUp={item.run}>
                   <text width={24} flexShrink={0} fg={active() ? theme.selectedListItemText : theme.text} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
-                    {(slash()?.index ?? 0) > 0 && item.mention ? item.mention : `/${item.name}`}
+                    {item.label}
                   </text>
                   <text fg={active() ? theme.selectedListItemText : theme.textMuted} wrapMode="none" overflow="hidden">{truncate(item.description ?? "", 70)}</text>
                 </box>

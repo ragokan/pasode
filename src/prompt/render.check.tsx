@@ -154,7 +154,10 @@ test("punctuation is literal, submission preserves whitespace and arrows only mo
     expect(submissions[0]).toEqual({ text, images: [] })
     await screen.flush()
     expect(prompt?.isEmpty()).toBe(true)
-    await screen.mockInput.pressKeys(["ARROW_UP", "ARROW_DOWN"])
+    // ↑ on the empty prompt recalls what was just sent; ↓ (to the end of it, then past it) returns to the empty prompt.
+    await screen.mockInput.pressKeys(["ARROW_UP"])
+    expect(prompt?.text()).toBe(text)
+    await screen.mockInput.pressKeys(["ARROW_DOWN", "ARROW_DOWN"])
     expect(prompt?.isEmpty()).toBe(true)
     prompt?.setText("  好\nnew draft  \n")
     await screen.mockInput.pressKeys(["ARROW_UP", "ARROW_DOWN"])

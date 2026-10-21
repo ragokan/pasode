@@ -18,6 +18,9 @@ import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth
 import { active, agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, waiting, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
+import { registerPromptCommands } from "./prompt/commands"
+import { enqueue } from "./prompt/queue"
+import { suggestFiles } from "./prompt/files"
 import { renameArgument } from "./prompt/slash"
 import { quit } from "./renderer"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef } from "./session"
@@ -123,6 +126,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
   ]
   registerCommands(builtins)
+  registerPromptCommands(() => prompt)
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -598,11 +602,13 @@ export function App(props: { initialAgentId?: string }) {
   }
 
   /** Sends exactly what was typed plus native image attachments; rejecting keeps the prompt's draft. */
-  async function submit(input: PromptSubmit) {
+  async function submit(input: PromptSubmit, options?: { queue?: boolean }) {
     const agent = current()
     const images = input.images.length ? input.images : undefined
     const name = renameArgument(input.text)
     if (agent && name && !images) return void (await actions.rename(agent.id, name))
+    // <leader>return mid-turn holds the message until the turn ends (prompt/queue.tsx sends it); otherwise it's a plain send.
+    if (options?.queue && agent?.status === "running") return void enqueue(agent.id, input)
     const messageId = crypto.randomUUID()
     rememberImages(messageId, images)
     try {
@@ -757,7 +763,9 @@ export function App(props: { initialAgentId?: string }) {
     <Prompt
       ref={(ref) => (prompt = ref)}
       focused={!dialog.isOpen && !permission() && !subagent() && !composerOpen()}
+      sessionId={agentId()}
       cwd={cwd()}
+      suggestFiles={(query) => suggestFiles(query, cwd())}
       slashItems={slashItems()}
       agent={{ label: agentLabel(), color: theme.agent }}
       model={modelInfo()}
