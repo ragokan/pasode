@@ -58,6 +58,8 @@ async function diagnostics() {
 function Diagnostic(props: { provider: string }) {
   // Can take a while: the daemon runs the provider's CLI checks.
   const [text] = createResource(() => daemon.getProviderDiagnostic(props.provider).then((result) => result.diagnostic))
+  // Reading a rejected resource throws, so the error comes first.
+  const shown = () => (text.error ? String(text.error.message ?? text.error) : (text() ?? ""))
   return (
     <box paddingLeft={4} paddingRight={4} paddingBottom={1} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
@@ -67,8 +69,8 @@ function Diagnostic(props: { provider: string }) {
         <text fg={theme.textMuted}>esc</text>
       </box>
       <Show when={!text.loading} fallback={<Spinner>Running diagnostics…</Spinner>}>
-        <scrollbox height={Math.min(22, (text() ?? "").split("\n").length || 1)} scrollbarOptions={{ visible: false }}>
-          <text fg={text.error ? theme.error : theme.textMuted}>{text.error ? String(text.error.message ?? text.error) : text()}</text>
+        <scrollbox height={Math.min(22, shown().split("\n").length || 1)} scrollbarOptions={{ visible: false }}>
+          <text fg={text.error ? theme.error : theme.textMuted}>{shown()}</text>
         </scrollbox>
       </Show>
     </box>

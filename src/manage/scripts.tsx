@@ -1,8 +1,9 @@
 // Workspace scripts (paseo.json): lifecycle, health, port and proxy URL of the open session's workspace, start/stop live,
-// plus the workspace setup run. Paseo-native; the scripts run in Paseo terminals (output opens like /shells).
+// plus setup progress and, for a PR workspace whose scripts were blocked, the trust-and-run-setup action. Paseo-native;
+// the scripts run in Paseo terminals (output opens like /shells).
 import { createMemo, createSignal, onCleanup } from "solid-js"
 import { openShellOutput } from "../composer"
-import { dialog, DialogSelect } from "../dialog"
+import { dialog, dialogs, DialogSelect } from "../dialog"
 import { api, daemon } from "../paseo"
 import { current, notify, showError } from "../state"
 import { theme } from "../theme"
@@ -68,9 +69,15 @@ function Scripts(props: { workspaceId: string }) {
     void events.release().catch(() => {})
   })
 
+  // The daemon only runs setup from here to trust a PR workspace whose scripts were blocked; the Paseo app offers it only then.
+  const blocked = () => {
+    const snapshot = setup()
+    return snapshot?.status === "blocked" ? snapshot.blockedSource : undefined
+  }
+  const noun = () => (blocked()?.forge === "gitlab" ? "MR" : "PR")
   const tones = { error: theme.error, muted: theme.textMuted, warning: theme.warning, success: theme.success }
   const options = createMemo(() => [
-    { title: "Run workspace setup", value: SETUP, category: "Workspace", description: setupLabel(setup()) },
+    ...(blocked() ? [{ title: "Run setup", value: SETUP, category: "Workspace", description: `${noun()} #${blocked()!.number} from ${blocked()!.headRepository}` }] : []),
     ...scripts().map((script) => {
       const row = scriptRow(script)
       return {
@@ -91,18 +98,30 @@ function Scripts(props: { workspaceId: string }) {
   const runSetup = () =>
     daemon
       .runWorkspaceSetup(id)
-      .then((result) => (result.started ? notify("Running workspace setup…") : showError(result.error ?? "Workspace setup did not start")))
+      .then((result) => (result.started ? notify("Running workspace setup…") : showError(result.error ?? "The daemon didn't start setup: nothing was blocked in this workspace")))
       .catch(showError)
+  // Running setup trusts the PR's source, so ask first; back on the list afterwards, where the progress shows.
+  const trustAndRun = () =>
+    void dialogs
+      .confirm(
+        "Run setup",
+        `This ${noun()} comes from ${blocked()?.headRepository}, a different repository. Its setup and scripts could run code you have not reviewed. Run setup and allow its scripts?`,
+        "Run setup",
+      )
+      .then((ok) => {
+        if (ok) return runSetup()
+      })
+      .finally(openScripts)
   // Enter starts a stopped script and opens a running one's terminal output.
   const select = (name: string) => {
-    if (name === SETUP) return void runSetup()
+    if (name === SETUP) return trustAndRun()
     const script = scripts().find((item) => item.scriptName === name)
     if (script?.lifecycle === "running" && script.terminalId) return openShellOutput(script.terminalId)
     void start(name)
   }
   return (
     <DialogSelect
-      title={loaded() && !scripts().length ? "Scripts · none in this workspace's paseo.json" : "Scripts"}
+      title={["Scripts", setupLabel(setup()), loaded() && !scripts().length && "none in this workspace's paseo.json"].filter(Boolean).join(" · ")}
       options={options()}
       search={false}
       onSelect={(option) => select(option.value)}
