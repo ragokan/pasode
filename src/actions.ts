@@ -35,8 +35,8 @@ export async function cycleAgent(agent: PaseoAgent) {
 
 /** New session from the draft (provider/model/effort/agent; fork context or worktree if set). */
 export async function createSession(text: string, images?: Images, messageId?: string) {
-  const { provider, fork, worktree } = draft()
-  const modes = agentConfig(provider, draft().agent ?? "build")
+  const { provider, fork, worktree, profile } = draft()
+  const modes = { ...agentConfig(provider, draft().agent ?? "build"), ...(draft().agent !== "plan" && profile?.provider === provider ? profile.config : {}) }
   const models = draft().model ? [] : ((await api.providers.listModels(provider)).models ?? [])
   const model = draft().model ?? (models.find((m) => m.isDefault) ?? models[0])?.id
   if (!model) throw new Error(`No ${provider} models available on the daemon`)
@@ -64,7 +64,7 @@ export async function createSession(text: string, images?: Images, messageId?: s
     })
     id = handle.id
   }
-  setDraft({ ...draft(), fork: undefined, worktree: undefined, agent: undefined, cwd: undefined })
+  setDraft({ ...draft(), fork: undefined, worktree: undefined, agent: undefined, cwd: undefined, profile: undefined })
   return id
 }
 
