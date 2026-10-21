@@ -1,15 +1,17 @@
 // Full-screen changes view (/changes, <leader>v): the session directory's live git diff, file by file, with
 // commit/push/pull/discard and the PR dialog. Layout after OpenCode's diff viewer (MIT), over the daemon's diff stream.
-import { TextAttributes, type DiffRenderable, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes, type DiffRenderable, type KeyEvent, type PasteEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js"
+import { commands, isEnabled, runCommand } from "../commands"
 import { dialog } from "../dialog"
 import { filetype } from "../render/helpers"
 import { Spinner } from "../session"
 import { current, notify, prefs } from "../state"
+import { paneFocused } from "../terminal"
 import { syntax, theme } from "../theme"
 import { useCheckoutDiff, useCheckoutStatus, type DiffCompare } from "./live"
-import { branchLabel, canCommit, canPull, canPush, kindOf, patchOf, totals } from "./model"
+import { branchLabel, canCommit, canPull, canPush, kindOf, patchOf, pathsOf, totals } from "./model"
 import { commit, discard, pull, push } from "./ops"
 import { openPr } from "./pr"
 
@@ -65,8 +67,8 @@ function Changes(props: { cwd: string }) {
     commit: () => unless(!canCommit(status()!) ? "Nothing to commit" : undefined, () => commit(props.cwd)),
     push: () => unless(!canPush(status()!) ? "Nothing to push (no remote, nothing ahead, or behind the remote: pull first)" : undefined, () => push(props.cwd)),
     pull: () => unless(!canPull(status()!) ? "Nothing to pull (no remote, behind by 0, or uncommitted changes)" : undefined, () => pull(props.cwd)),
-    discard: () => unless(mode() === "base" ? "Switch to uncommitted changes (tab) to discard" : !file() ? "No file selected" : undefined, () => discard(props.cwd, [file()!.path], file()!.path)),
-    discardAll: () => unless(mode() === "base" ? "Switch to uncommitted changes (tab) to discard" : !diff.files.length ? "No changes to discard" : undefined, () => discard(props.cwd, diff.files.map((item) => item.path), `all ${diff.files.length} changed files`)),
+    discard: () => unless(mode() === "base" ? "Switch to uncommitted changes (tab) to discard" : !file() ? "No file selected" : undefined, () => discard(props.cwd, pathsOf([file()!]), file()!.path)),
+    discardAll: () => unless(mode() === "base" ? "Switch to uncommitted changes (tab) to discard" : !diff.files.length ? "No changes to discard" : undefined, () => discard(props.cwd, pathsOf(diff.files), `all ${diff.files.length} changed files`)),
     pr: () => openPr(props.cwd),
   }
 
@@ -75,24 +77,46 @@ function Changes(props: { cwd: string }) {
     if (dialog.isOpen) return
     key.preventDefault()
     key.stopPropagation()
-    if (key.name === "escape" || key.name === "q" || (key.ctrl && key.name === "c")) return closeChanges()
+    if (key.ctrl && key.name === "c") return closeChanges()
+    // Chords (ctrl+p palette, ctrl+d exit, alt+…) belong to the app: swallowed, never an action here.
+    if (key.ctrl || key.meta || key.option || key.super || key.hyper) return
+    // Shift makes a letter another key (d discards a file, D all of them; shift+c is not c).
+    const name = key.shift && key.name.length === 1 ? key.name.toUpperCase() : key.name
+    if (name === "escape" || name === "q") return closeChanges()
     if (!status()) return
-    if (key.name === "up" || key.name === "k") select(-1)
-    else if (key.name === "down" || key.name === "j") select(1)
-    else if (key.name === "]") hunk(1)
-    else if (key.name === "[") hunk(-1)
-    else if (key.name === "pagedown") pane?.scrollBy(Math.max(1, pane.height - 2))
-    else if (key.name === "pageup") pane?.scrollBy(-Math.max(1, pane.height - 2))
-    else if (key.name === "tab") setMode((value) => (value === "base" ? "uncommitted" : "base"))
-    else if (key.name === "c") actions.commit()
-    else if (key.name === "p") actions.push()
-    else if (key.name === "u") actions.pull()
-    else if (key.name === "d") key.shift ? actions.discardAll() : actions.discard()
-    else if (key.name === "r") actions.pr()
+    if (name === "up" || name === "k") select(-1)
+    else if (name === "down" || name === "j") select(1)
+    else if (name === "]") hunk(1)
+    else if (name === "[") hunk(-1)
+    else if (name === "pagedown") pane?.scrollBy(Math.max(1, pane.height - 2))
+    else if (name === "pageup") pane?.scrollBy(-Math.max(1, pane.height - 2))
+    else if (name === "tab") setMode((value) => (value === "base" ? "uncommitted" : "base"))
+    else if (name === "c") actions.commit()
+    else if (name === "p") actions.push()
+    else if (name === "u") actions.pull()
+    else if (name === "d") actions.discard()
+    else if (name === "D") actions.discardAll()
+    else if (name === "r") actions.pr()
   }
-  // Ahead of App's own handler (and the prompt's), so this view is modal.
-  onMount(() => renderer.keyInput.prependListener("keypress", onKey))
-  onCleanup(() => renderer.keyInput.off("keypress", onKey))
+  // Pastes would reach the focused prompt or terminal, which runs them (a shell executes pasted lines).
+  const onPaste = (event: PasteEvent) => {
+    if (dialog.isOpen) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  // Ahead of App's own handlers (and the prompt's), so this view is modal.
+  onMount(() => {
+    renderer.keyInput.prependListener("keypress", onKey)
+    renderer.keyInput.prependListener("paste", onPaste)
+  })
+  onCleanup(() => {
+    renderer.keyInput.off("keypress", onKey)
+    renderer.keyInput.off("paste", onPaste)
+  })
+  // A focused terminal pane is released while this view is up, and focused again on close (if it's still there).
+  const hadPane = paneFocused()
+  if (hadPane) runCommand("terminal.toggle")
+  onCleanup(() => hadPane && !paneFocused() && commands().some((command) => command.id === "terminal.close" && isEnabled(command)) && runCommand("terminal.toggle"))
 
   const hints = createMemo(() => {
     const s = status()

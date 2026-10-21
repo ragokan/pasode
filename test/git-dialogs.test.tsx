@@ -35,6 +35,7 @@ beforeEach(() => {
   const events = { subscriptionId: "e", ready: Promise.resolve({}), subscribe: () => () => {}, release: async () => {} }
   spy(spyOn(daemon, "observeEvents").mockImplementation((() => events) as never))
   spy(spyOn(daemon, "getCheckoutStatus").mockImplementation((async () => status) as never))
+  spy(spyOn(daemon, "checkoutRefresh").mockImplementation((async () => ({ success: true })) as never))
   setAgents("g1", { id: "g1", title: "Git session", status: "idle", cwd: "/tmp/g", provider: "claude", pendingPermissions: [] } as unknown as PaseoAgent)
   setAgentId("g1")
   setToast(undefined)
@@ -73,6 +74,28 @@ test("/pr shows the PR, its checks and merges after a confirm, with the reposito
   expect(merged).toEqual([{ method: "squash" }])
   expect(toast()).toMatchObject({ variant: "success", message: "Merged #7 (squash)" })
 })
+
+for (const [name, replacement] of [["a different PR", () => pr({ number: 8, url: "https://github.com/o/r/pull/8", title: "Other thing", headRefName: "other" })], ["no PR", () => null]] as const) {
+  test(`a merge is refused when the branch has ${name} by the time the confirm is answered`, async () => {
+    let answer: unknown = pr()
+    spy(spyOn(daemon, "checkoutPrStatus").mockImplementation((async () => ({ cwd: "/tmp/g", status: answer, githubFeaturesEnabled: true, error: null })) as never))
+    const merged: unknown[] = []
+    spy(spyOn(daemon, "checkoutPrMerge").mockImplementation((async (_cwd: string, input: unknown) => (merged.push(input), { success: true, error: null })) as never))
+    await mount()
+    openPr("/tmp/g")
+    await settle()
+    screen!.mockInput.pressArrow("down")
+    screen!.mockInput.pressEnter()
+    await settle()
+    expect(frame()).toContain('Merge #7 "Add thing" into main (squash)?')
+    // The daemon would merge whatever PR the directory's branch has when the request lands.
+    answer = replacement()
+    screen!.mockInput.pressEnter()
+    await settle()
+    expect(merged).toEqual([])
+    expect(toast()).toMatchObject({ variant: "warning", message: "The branch's pull request is no longer #7; nothing was merged" })
+  })
+}
 
 test("/pr explains why a PR can't merge instead of offering it, and offers Create when there is none", async () => {
   let answer: unknown = { cwd: "/tmp/g", status: pr({ isDraft: true }), githubFeaturesEnabled: true, error: null }
@@ -151,10 +174,12 @@ test("/worktrees lists Paseo worktrees; enter starts the next session there; ctr
   expect(archived).toEqual([{ worktreePath: "/home/u/.paseo/worktrees/abc/feat-x", scope: "worktree" }])
   expect(frame()).not.toContain("feat/x")
 
-  setDraft({ provider: "claude" })
+  // A fork seeded earlier would win in createSession (it prefers fork.cwd), starting the session in the other repo.
+  setDraft({ provider: "claude", fork: { title: "Forked", cwd: "/elsewhere", attachment: {} as never } })
   screen!.mockInput.pressEnter()
   await settle()
   expect(draft().cwd).toBe("/home/u/.paseo/worktrees/abc/other")
+  expect(draft().fork).toBeUndefined()
   expect(agentId()).toBeUndefined()
   expect(dialog.isOpen).toBe(false)
 })

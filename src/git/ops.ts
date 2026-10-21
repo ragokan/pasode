@@ -54,10 +54,24 @@ export async function createPr(cwd: string) {
   void refreshStatus(cwd, true)
 }
 
+/**
+ * The merge request carries only the directory and method, so the daemon merges whichever PR the branch has when
+ * it arrives (it has no way to be told which). Re-read it just before sending and stop if it isn't the one confirmed.
+ */
+async function stillPr(cwd: string, pr: Pr) {
+  await daemon.checkoutRefresh(cwd).catch(() => {})
+  const fresh = await daemon.checkoutPrStatus(cwd).catch(showError)
+  if (!fresh) return false
+  if (fresh.status?.number === pr.number && fresh.status?.url === pr.url) return true
+  notify(`The branch's pull request is no longer #${pr.number ?? ""}; nothing was merged`, "warning")
+  return false
+}
+
 export async function mergePr(cwd: string, pr: Pr, methods: string[]) {
   const method = methods.length === 1 ? methods[0] : await dialogs.select({ title: "Merge method", options: methods.map((value) => ({ title: value, value })) })
   if (!method) return
   if (!(await dialogs.confirm("Merge pull request", `Merge #${pr.number ?? ""} "${pr.title}" into ${pr.baseRefName} (${method})?`, "Merge"))) return
+  if (!(await stillPr(cwd, pr))) return
   notify("Merging…")
   const result = await daemon.checkoutPrMerge(cwd, { method: method as "merge" | "squash" | "rebase" }).catch(showError)
   if (!result) return

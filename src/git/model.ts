@@ -17,6 +17,9 @@ export function patchOf(file: ParsedDiffFile) {
   return out.join("\n") + "\n"
 }
 
+/** Repo paths to hand the daemon for these files: a rename touches both its new and its old path. */
+export const pathsOf = (files: readonly ParsedDiffFile[]) => [...new Set(files.flatMap((file) => [file.path, file.oldPath ?? file.path]))]
+
 export const kindOf = (file: ParsedDiffFile) => (file.isNew ? "A" : file.isDeleted ? "D" : file.oldPath && file.oldPath !== file.path ? "R" : "M")
 
 export function totals(files: readonly ParsedDiffFile[]) {

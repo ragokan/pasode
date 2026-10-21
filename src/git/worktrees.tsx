@@ -26,7 +26,8 @@ export async function openWorktrees() {
         }))}
         onSelect={(option) => {
           dialog.clear()
-          setDraft({ ...draft(), cwd: option.value, worktree: undefined })
+          // A /fork draft would win (createSession prefers fork.cwd) and start the session in the other repo.
+          setDraft({ ...draft(), cwd: option.value, worktree: undefined, fork: undefined })
           navigate(undefined)
           notify(`Next session starts in ${tilde(option.value)}`)
         }}
