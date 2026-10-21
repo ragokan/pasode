@@ -2,10 +2,10 @@ import { expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { cycleAgent, exportTranscript } from "./actions"
+import { canRedo, cycleAgent, cycleChild, exportTranscript, fork, pin, redo, revertBlocker, revertTo } from "./actions"
 import { dialogs } from "./dialog"
-import { api, daemon, openTimeline, setAgents, setTimeline, type PaseoAgent } from "./paseo"
-import { setAgentId, setPref, setToast, toast } from "./state"
+import { agents, api, daemon, openTimeline, setAgents, setTimeline, timeline, workspacePins, type PaseoAgent } from "./paseo"
+import { agentId, draft, setAgentId, setDraft, setPref, setToast, toast } from "./state"
 
 test('with permissions "prompt", Shift+Tab Plan→Build on Claude asks for the default mode, not Bypass', async () => {
   const modes: string[] = []
@@ -75,3 +75,144 @@ for (const change of ["replaced", "switched", "switched while prompting", "compl
     }
   })
 }
+
+// A session of three prompts; the provider supports rewinding as `capabilities` says.
+const session = (capabilities: Partial<NonNullable<PaseoAgent["capabilities"]>>) => {
+  const rows = [
+    { type: "user_message", text: "first", messageId: "m1" },
+    { type: "assistant_message", text: "a1" },
+    { type: "user_message", text: "second", messageId: "m2" },
+    { type: "assistant_message", text: "a2" },
+    { type: "user_message", text: "third", messageId: "m3" },
+  ] as const
+  setAgents("rw", { id: "rw", provider: "claude", cwd: "/tmp", title: "Rewind me", capabilities } as PaseoAgent)
+  setAgentId("rw")
+  setTimeline({ agentId: "rw", rows: [...rows], times: rows.map((_, i) => 1000 + i), marks: [], loading: false, hasOlder: false, startCursor: undefined })
+}
+
+test("revert to a middle message rewinds there, restores its text and queues every undone prompt for redo in order", async () => {
+  session({ supportsRewindBoth: true })
+  const rewound: unknown[][] = []
+  const rewind = spyOn(daemon, "rewindAgent").mockImplementation(async (...args) => (rewound.push(args), { ok: true, error: null, requestId: "r", agentId: "rw" }))
+  const confirm = spyOn(dialogs, "confirm").mockResolvedValue(true)
+  const sent: string[] = []
+  const ref = spyOn(api.agents, "ref").mockImplementation(() => ({ send: async (text: string) => void sent.push(text) }) as never)
+  try {
+    const restored: string[] = []
+    await revertTo(timeline.rows[2] as never, (text) => restored.push(text))
+    expect(confirm.mock.calls[0]![1]).toBe("Rewind 2 messages and roll back their file edits? Paseo can't restore the replies afterwards.")
+    expect(rewound).toEqual([["rw", "m2", "both"]])
+    expect(restored).toEqual(["second"])
+    expect(toast()?.message).toBe("Undid 2 messages and their file changes")
+    await redo()
+    await redo()
+    expect(sent).toEqual(["second", "third"])
+    expect(canRedo()).toBe(false)
+  } finally {
+    rewind.mockRestore()
+    confirm.mockRestore()
+    ref.mockRestore()
+    setAgentId(undefined)
+    setToast(undefined)
+  }
+})
+
+test("Codex rewinds the conversation only, and a provider that can't rewind says so without asking the daemon", async () => {
+  const rewind = spyOn(daemon, "rewindAgent").mockResolvedValue({ ok: true, error: null, requestId: "r", agentId: "rw" })
+  const confirm = spyOn(dialogs, "confirm").mockResolvedValue(true)
+  try {
+    session({ supportsRewindConversation: true })
+    await revertTo(timeline.rows[4] as never, () => {})
+    expect(rewind.mock.calls).toEqual([["rw", "m3", "conversation"]])
+    expect(toast()?.message).toBe("Undid the last message (files unchanged)")
+    rewind.mockClear()
+    session({})
+    expect(revertBlocker(agents.rw!, timeline.rows[2] as never)).toBe("claude sessions can't rewind")
+    await revertTo(timeline.rows[2] as never, () => {})
+    expect(rewind).not.toHaveBeenCalled()
+    expect(toast()).toMatchObject({ variant: "warning", message: "claude sessions can't rewind" })
+  } finally {
+    rewind.mockRestore()
+    confirm.mockRestore()
+    setAgentId(undefined)
+    setToast(undefined)
+  }
+})
+
+test("fork from a message stops the history at the row before it and puts the message back in the prompt", async () => {
+  session({})
+  setTimeline("times", [1000, 1001, 1002, 1003, 1004])
+  const prompts = ["first", "second", "third"].map((text, i) => ({ seq: 1 + i * 2, timestamp: new Date(1000 + i * 2).toISOString(), preview: text }))
+  const list = spyOn(daemon, "listAgentTimelinePrompts").mockResolvedValue({ epoch: "e", prompts, requestId: "r", agentId: "rw", error: null } as never)
+  const fetched: unknown[] = []
+  const page = spyOn(daemon, "fetchAgentTimeline").mockImplementation(async (_id, options) => (fetched.push(options), { reset: false, epoch: "e", entries: [{ seqEnd: 4 }] }) as never)
+  const built: unknown[] = []
+  const context = spyOn(daemon, "buildAgentForkContext").mockImplementation(async (_id, options) => (built.push(options), { attachment: { type: "text", text: "summary" } }) as never)
+  try {
+    const restored: string[] = []
+    await fork({ row: timeline.rows[2] as never, restore: (text) => restored.push(text) })
+    // "second" is prompt seq 3: the row before it ends at seq 4 in this fake, so the boundary comes from that fetch.
+    expect(fetched).toEqual([{ direction: "before", cursor: { epoch: "e", seq: 3 }, limit: 1, projection: "projected" }])
+    expect(built).toEqual([{ boundaryCursor: { epoch: "e", seq: 4 } }])
+    expect(restored).toEqual(["second"])
+    expect(draft().fork).toMatchObject({ title: "Rewind me", cwd: "/tmp", attachment: { text: "summary" } })
+    expect(agentId()).toBeUndefined()
+
+    // Forking the whole session sends no boundary.
+    session({})
+    built.length = 0
+    await fork()
+    expect(built).toEqual([undefined])
+
+    // The first message has nothing before it: no history to carry, same directory.
+    session({})
+    setTimeline("times", [1000, 1001, 1002, 1003, 1004])
+    page.mockImplementation(async () => ({ reset: false, epoch: "e", entries: [] }) as never)
+    built.length = 0
+    await fork({ row: timeline.rows[0] as never, restore: (text) => restored.push(text) })
+    expect(built).toEqual([])
+    expect(draft()).toMatchObject({ cwd: "/tmp", fork: undefined })
+    expect(restored).toEqual(["second", "first"])
+  } finally {
+    list.mockRestore()
+    page.mockRestore()
+    context.mockRestore()
+    setAgentId(undefined)
+    setDraft({ provider: "claude" })
+    setToast(undefined)
+  }
+})
+
+test("next/previous child cycles the siblings, and from the parent enters at either end", () => {
+  const at = (id: string, created: number, parent?: string) =>
+    ({ id, createdAt: new Date(created).toISOString(), labels: parent ? { "paseo.parent-agent-id": parent } : {} }) as unknown as PaseoAgent
+  setAgents({ p: at("p", 0), c1: at("c1", 1, "p"), c2: at("c2", 2, "p"), c3: at("c3", 3, "p"), other: at("other", 4) })
+  const visit = (id: string, delta: 1 | -1) => (setAgentId(id), cycleChild(delta), agentId())
+  expect([visit("p", 1), visit("p", -1), visit("c1", 1), visit("c3", 1), visit("c1", -1)]).toEqual(["c1", "c3", "c2", "c1", "c3"])
+  setAgentId("other")
+  cycleChild(1)
+  expect(agentId()).toBe("other")
+  expect(toast()?.message).toBe("No child sessions")
+  setAgentId(undefined)
+  setAgents({})
+  setToast(undefined)
+})
+
+test("pinning a lone session's workspace asks the daemon and records it; a shared workspace is refused", async () => {
+  setAgents({ a: { id: "a", workspaceId: "w1" } as PaseoAgent, b: { id: "b", workspaceId: "w2" } as PaseoAgent, c: { id: "c", workspaceId: "w2" } as PaseoAgent })
+  const pinned = spyOn(daemon, "setWorkspacePinned").mockImplementation(async (_id, value) => ({ pinnedAt: value ? "2026-01-01T00:00:00Z" : null }))
+  try {
+    await pin("a")
+    expect(workspacePins.w1).toBe("2026-01-01T00:00:00Z")
+    await pin("a")
+    expect(workspacePins.w1).toBeNull()
+    expect(pinned.mock.calls).toEqual([["w1", true], ["w1", false]])
+    await pin("b")
+    expect(pinned).toHaveBeenCalledTimes(2)
+    expect(toast()?.variant).toBe("warning")
+  } finally {
+    pinned.mockRestore()
+    setAgents({})
+    setToast(undefined)
+  }
+})
