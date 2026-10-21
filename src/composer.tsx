@@ -6,14 +6,17 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "so
 import { createStore, reconcile } from "solid-js/store"
 import { dialog } from "./dialog"
 import { agents, daemon, findModel, openSubagentTimeline } from "./paseo"
-import { current } from "./state"
-import { SplitBorder } from "./session"
 import { agentId, navigate, setSubagent, showError } from "./state"
+import { SplitBorder } from "./session"
+import { createTerminal, handleTerminalKey, paneFocused, TerminalPane, terminals, type Terminal } from "./terminal"
 import { theme } from "./theme"
+
+export { registerTerminalCommands, terminals, useTerminalFeed } from "./terminal"
 
 export type SubagentEntry = { key: string; kind: "agent" | "native"; id: string; agent: string; title: string; status: string; model?: string }
 
-const [native, setNative] = createStore<{ parentId?: string; list: Awaited<ReturnType<typeof daemon.listProviderSubagents>>["subagents"] }>({ list: [] })
+type Native = Awaited<ReturnType<typeof daemon.listProviderSubagents>>["subagents"][number]
+const [native, setNative] = createStore<{ parentId?: string; list: Native[] }>({ list: [] })
 
 export async function refreshSubagents(parentId: string) {
   const result = await daemon.listProviderSubagents(parentId).catch(() => undefined)
@@ -58,39 +61,35 @@ export const subagents = createMemo<SubagentEntry[]>(() => {
 
 export const runningSubagents = () => subagents().filter((entry) => entry.status === "running").length
 
-type Terminal = Awaited<ReturnType<typeof daemon.listTerminals>>["terminals"][number]
-const [terminalStore, setTerminalStore] = createStore<{ cwd?: string; list: Terminal[] }>({ list: [] })
-/** Paseo terminals open in the current session's directory. */
-export const terminals = () => (terminalStore.cwd === current()?.cwd ? terminalStore.list : [])
-
-async function refreshTerminals(cwd: string) {
-  const result = await daemon.listTerminals(cwd).catch(() => undefined)
-  if (!result || current()?.cwd !== cwd) return
-  setTerminalStore("cwd", cwd)
-  setTerminalStore("list", reconcile(result.terminals))
-}
-
-/** Poll Paseo terminals for the session directory (cheap list RPC). */
-export function useTerminalPolling() {
-  createEffect(() => {
-    const cwd = current()?.cwd
-    if (!cwd) return
-    void refreshTerminals(cwd)
-    const timer = setInterval(() => void refreshTerminals(cwd), 3000)
-    onCleanup(() => clearInterval(timer))
-  })
-}
-
-/** Poll provider subagents while the session runs (Paseo has no cheap push for them). */
-export function useSubagentPolling(running: () => boolean) {
+/** The open session's provider subagents, live: a one-shot list for the initial state, then the daemon's pushed upserts/removals. */
+export function useSubagentFeed() {
   createEffect(() => {
     const parent = agentId()
-    if (!parent) return
-    void refreshSubagents(parent)
-    if (!running()) return
-    const timer = setInterval(() => void refreshSubagents(parent), 3000)
-    onCleanup(() => clearInterval(timer))
+    if (parent) void refreshSubagents(parent)
   })
+  const feed = daemon.observeEvents(["agent.provider_subagents.update"])
+  feed.subscribe({
+    // Updates aren't replayed across a reconnect, so list again once the feed is back.
+    snapshot() {
+      const parent = agentId()
+      if (parent) void refreshSubagents(parent)
+    },
+    update(message) {
+      if (message.type !== "agent.provider_subagents.update") return
+      const update = message.payload
+      if (update.kind === "timeline") return // an open subagent view follows its own (openSubagentTimeline)
+      if ((update.kind === "upsert" ? update.subagent.parentAgentId : update.parentAgentId) !== native.parentId) return
+      const { list } = native
+      const next =
+        update.kind === "remove"
+          ? list.filter((item) => item.id !== update.subagentId)
+          : list.some((item) => item.id === update.subagent.id)
+            ? list.map((item) => (item.id === update.subagent.id ? update.subagent : item))
+            : [...list, update.subagent]
+      setNative("list", reconcile(next, { key: "id" }))
+    },
+  })
+  onCleanup(() => void feed.release().catch(() => {}))
 }
 
 export async function openSubagent(entry: SubagentEntry) {
@@ -106,11 +105,15 @@ const [open, setOpen] = createSignal(false)
 const [tab, setTab] = createSignal<Tab>("subagents")
 const [selected, setSelected] = createSignal(0)
 const [activeOnly, setActiveOnly] = createSignal(true)
-export const composerOpen = open
+const [armed, setArmed] = createSignal<string>()
+/** Open, or the terminal pane holds the keyboard: the prompt gives way to either. */
+export const composerOpen = () => open() || paneFocused()
 
 const visibleSubagents = () => subagents().filter((entry) => (activeOnly() ? entry.status === "running" : entry.status !== "running"))
 const visibleShells = () => terminals()
-const killTerminal = (id: string) => void daemon.killTerminal(id).then(() => current() && refreshTerminals(current()!.cwd), showError)
+// Paseo titles a `!` terminal with its whole wrapper script; its name is the command.
+const shellLabel = (shell: Terminal) => (shell.name.startsWith("!") ? shell.name : shell.title || shell.name)
+const killTerminal = (id: string) => void daemon.killTerminal(id).catch(showError)
 
 /** session.child.first: toggle the picker, opening on whichever tab has something live. */
 export function toggleComposer() {
@@ -125,7 +128,12 @@ export const closeComposer = () => setOpen(false)
 
 /** Keys while the composer is open (OpenCode's "composer" keymap mode). */
 export function handleComposerKey(key: KeyEvent) {
+  if (handleTerminalKey(key)) return true
   if (!open()) return false
+  // archive/detach need their key twice in a row, like the session list's ctrl+d.
+  const was = armed()
+  setArmed(undefined)
+  const confirm = (action: string) => was === action || (setArmed(action), false)
   const count = tab() === "subagents" ? visibleSubagents().length : visibleShells().length
   if (key.name === "escape" || (key.ctrl && key.name === "c")) closeComposer()
   else if (key.name === "left" || key.name === "right") {
@@ -152,6 +160,14 @@ export function handleComposerKey(key: KeyEvent) {
   } else if (key.ctrl && key.name === "a" && tab() === "subagents") {
     setActiveOnly((value) => !value)
     setSelected(0)
+  } else if (key.ctrl && (key.name === "k" || key.name === "u") && tab() === "subagents") {
+    const entry = visibleSubagents()[selected()]
+    const archive = key.name === "k"
+    if (entry?.kind === "agent" && confirm(`${archive ? "archive" : "detach"}:${entry.id}`)) {
+      if (archive) void daemon.archiveAgent(entry.id).catch(showError)
+      // Like the Paseo app, a detached child continues as its own session, opened right away.
+      else void daemon.detachAgent(entry.id).then(() => (closeComposer(), navigate(entry.id)), showError)
+    }
   } else return false
   return true
 }
@@ -160,8 +176,16 @@ export function Composer() {
   let scroll: ScrollBoxRenderable | undefined
   const items = createMemo(() =>
     tab() === "subagents"
-      ? visibleSubagents().map((entry) => ({ key: entry.key, text: `${entry.agent}: ${entry.title}`, meta: [entry.model, entry.status === "running" && "Running"].filter(Boolean).join(" · ") }))
-      : visibleShells().map((shell) => ({ key: shell.id, text: shell.title || shell.name, meta: shell.activity?.state ?? "" })),
+      ? visibleSubagents().map((entry) => {
+          const action = [...(["archive", "detach"] as const)].find((name) => armed() === `${name}:${entry.id}`)
+          return {
+            key: entry.key,
+            text: action ? `Press ctrl+${action === "archive" ? "k" : "u"} again to ${action}` : `${entry.agent}: ${entry.title}`,
+            meta: action ? "" : [entry.model, entry.status === "running" && "Running"].filter(Boolean).join(" · "),
+            armed: !!action,
+          }
+        })
+      : visibleShells().map((shell) => ({ key: shell.id, text: shellLabel(shell), meta: shell.activity?.state ?? "", armed: false })),
   )
   createEffect(() => {
     if (selected() >= items().length) setSelected(Math.max(0, items().length - 1))
@@ -170,11 +194,18 @@ export function Composer() {
   })
   const hints = () =>
     tab() === "subagents"
-      ? [["enter", "open"], ["ctrl+d", "interrupt"], ["ctrl+a", activeOnly() ? "finished" : "running"]]
+      ? [
+          ["enter", "open"],
+          ["ctrl+d", "interrupt"],
+          ["ctrl+a", activeOnly() ? "finished" : "running"],
+          ...(visibleSubagents()[selected()]?.kind === "agent" ? [["ctrl+k", "archive"], ["ctrl+u", "detach"]] : []),
+        ]
       : items().length
         ? [["enter", "output"], ["ctrl+d", "kill"]]
         : []
   return (
+    <>
+    <TerminalPane />
     <Show when={open()}>
       <box border={["left"]} customBorderChars={SplitBorder} borderColor={theme.border} backgroundColor={theme.backgroundPanel} paddingLeft={1} paddingRight={2} paddingTop={1} paddingBottom={1} flexShrink={0}>
         <box gap={1}>
@@ -206,7 +237,7 @@ export function Composer() {
                     gap={1}
                     paddingLeft={1}
                     paddingRight={1}
-                    backgroundColor={index() === selected() ? theme.backgroundElement : undefined}
+                    backgroundColor={item.armed ? theme.error : index() === selected() ? theme.backgroundElement : undefined}
                     onMouseMove={() => setSelected(index())}
                     onMouseUp={() => {
                       setSelected(index())
@@ -238,10 +269,25 @@ export function Composer() {
         </box>
       </box>
     </Show>
+    </>
   )
 }
 
-/** OpenCode's DialogShellOutput, reading the Paseo terminal's screen (ANSI stripped), refreshed every second. */
+/** `!command`: runs in a new Paseo terminal in `cwd` and opens its output; the model never sees it. */
+export async function runShell(cwd: string, text: string) {
+  const command = text.trim()
+  if (!command) throw new Error("Type a command after !")
+  try {
+    // Paseo drops a terminal, output included, as soon as its process exits, so the command waits on Enter at the end.
+    const terminal = await createTerminal(cwd, `! ${command.split("\n")[0]}`, { command: "sh", args: ["-c", `(\n${command}\n)\ncode=$?\nprintf '\\n[exit %s]\\n' "$code"\nread -r _`] })
+    openShellOutput(terminal.id)
+  } catch (error) {
+    showError(error)
+    throw error
+  }
+}
+
+/** OpenCode's DialogShellOutput: the Paseo terminal's text (ANSI stripped, scrollable), re-read whenever the terminal's stream shows activity. */
 export function openShellOutput(id: string) {
   dialog.replace(() => <ShellOutput id={id} />, "large")
 }
@@ -249,14 +295,25 @@ export function openShellOutput(id: string) {
 function ShellOutput(props: { id: string }) {
   const terminal = () => terminals().find((item) => item.id === props.id)
   const [lines, setLines] = createSignal<string[]>([])
-  const load = () =>
+  let latest = 0
+  const load = () => {
+    const request = ++latest
     daemon
       .captureTerminal(props.id, { stripAnsi: true })
-      .then((capture) => setLines(capture.lines))
+      .then((capture) => request === latest && setLines(capture.lines))
       .catch(() => {})
+  }
+  // A burst of output is one capture, not one per chunk.
+  let refresh: ReturnType<typeof setTimeout> | undefined
+  const schedule = () => (refresh ??= setTimeout(() => ((refresh = undefined), load()), 100))
   void load()
-  const timer = setInterval(load, 1000)
-  onCleanup(() => clearInterval(timer))
+  const stream = daemon.observeTerminal(props.id, schedule, { restore: { mode: "live" } })
+  stream.subscribe({ snapshot() {}, update: (message) => message.type === "terminal_stream_exit" && schedule() })
+  onCleanup(() => {
+    clearTimeout(refresh)
+    void stream.release().catch(() => {})
+  })
+  const status = () => (terminal() ? (lines().findLast((line) => /^\[exit \d+\]$/.test(line.trim()))?.slice(1, -1) ?? terminal()!.activity?.state ?? "running") : "closed")
   useKeyboard((key) => {
     if (key.defaultPrevented || !(key.ctrl && key.name === "d")) return
     key.preventDefault()
@@ -267,7 +324,7 @@ function ShellOutput(props: { id: string }) {
     <box paddingLeft={4} paddingRight={4} paddingBottom={1} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
         <text fg={theme.text} attributes={TextAttributes.BOLD} wrapMode="none" truncate>
-          {terminal()?.title || terminal()?.name || "Shell"}
+          {terminal() ? shellLabel(terminal()!) : "Shell"}
         </text>
         <text fg={theme.textMuted}>esc</text>
       </box>
@@ -275,7 +332,7 @@ function ShellOutput(props: { id: string }) {
         <text fg={theme.textMuted}>{lines().join("\n").trimEnd() || "(no output)"}</text>
       </scrollbox>
       <text fg={theme.textMuted}>
-        {terminal() ? (terminal()!.activity?.state ?? "running") : "closed"} · <span style={{ fg: theme.text }}>ctrl+d</span> kill
+        {status()} · <span style={{ fg: theme.text }}>ctrl+d</span> kill
       </text>
     </box>
   )
