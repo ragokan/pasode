@@ -74,17 +74,19 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
   const warp = () => loadedPlugins.some((plugin) => plugin.id === "warp" && !plugin.error)
   const warpTerminal = () => ["warpterminal", "warp", "kaku"].includes(process.env.TERM_PROGRAM?.toLowerCase() ?? "")
 
-  let titled = false
-  const retitle = () => {
+  // The title last written (undefined: not ours). Agent updates re-run this often, so unchanged titles aren't re-sent;
+  // `resumed` forces one after a suspend, when the shell has set its own.
+  let written: string | undefined
+  const retitle = (resumed = false) => {
     if (renderer.isDestroyed || renderer.controlState === RendererControlState.EXPLICIT_SUSPENDED) return
     const agent = current()
-    const own = prefs.terminalTitle && !warp()
-    if (own) renderer.setTerminalTitle(windowTitle(agent && sessionTitle(agent)))
-    else if (titled && !prefs.terminalTitle) renderer.setTerminalTitle("")
-    titled = own
+    const title = prefs.terminalTitle && !warp() ? windowTitle(agent && sessionTitle(agent)) : undefined
+    if (title !== undefined && (resumed || title !== written)) renderer.setTerminalTitle(title)
+    else if (title === undefined && written !== undefined && !prefs.terminalTitle) renderer.setTerminalTitle("")
+    written = title
   }
-  createEffect(retitle)
-  renderer.once("destroy", () => titled && renderer.setTerminalTitle(""))
+  createEffect(() => retitle())
+  renderer.once("destroy", () => written !== undefined && renderer.setTerminalTitle(""))
 
   // Like Paseo's apps: a session finishing, failing or asking for permission while this terminal is in the background.
   // Only sessions opened here; the Paseo app and phone notify for the rest.
@@ -107,7 +109,7 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
   })
 
   const commands: Command[] = [
-    { id: "terminal.suspend", title: "Suspend terminal", category: "System", keybind: "ctrl+z", enabled: () => process.platform !== "win32", run: () => suspend(renderer, retitle) },
+    { id: "terminal.suspend", title: "Suspend terminal", category: "System", keybind: "ctrl+z", enabled: () => process.platform !== "win32", run: () => suspend(renderer, () => retitle(true)) },
     { id: "theme.switch_mode", title: "Toggle light/dark mode", category: "View", slash: "colormode", run: toggleColorMode },
     { id: "session.verbosity.cycle", title: "Cycle transcript verbosity", category: "View", slash: "verbosity", run: () => cyclePref("verbosity", ["low", "medium", "high"], "Verbosity") },
     { id: "session.toggle.exploration_grouping", title: "Toggle tool grouping", category: "View", slash: "grouping", run: () => cyclePref("grouping", ["auto", "none"], "Tool grouping") },

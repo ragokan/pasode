@@ -113,6 +113,11 @@ test("the window title follows the session, goes back to pasode on home, and is 
   setAgentId("t1")
   await ux.screen.renderOnce()
   expect(ux.titles.at(-1)).toBe("Fix parser")
+  const written = ux.titles.length
+  setLoadedPlugins([{ id: "other", spec: "x" }]) // re-runs the title effect without changing the title: not re-sent
+  setLoadedPlugins([{ id: "other", spec: "x" }, { id: "another", spec: "y" }])
+  expect(ux.titles).toHaveLength(written)
+  setLoadedPlugins([])
   setAgentId(undefined)
   expect(ux.titles.at(-1)).toBe("pasode")
   setPref("terminalTitle", false)
