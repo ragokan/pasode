@@ -24,6 +24,7 @@ export const settings: Setting[] = [
   { title: "TPS", category: "Session", key: "tps", ...onOff },
   { title: "New session location", category: "Session", key: "newLocation", values: ["launch", "inherit"], labels: ["launch directory", "active session"] },
   { title: "Permissions", category: "Session", key: "permissions", values: ["prompt", "bypass"] },
+  { title: "Session tabs", category: "Session", key: "tabs", ...onOff },
   { title: "Layout", category: "Diffs", key: "diffs", values: ["auto", "split", "unified"] },
   { title: "Mouse", category: "Input", key: "mouse", ...onOff },
 ]
