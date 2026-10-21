@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { batch, createComputed, createMemo, createRoot, createSignal } from "solid-js"
-import { createStore, produce, reconcile } from "solid-js/store"
+import { createStore, produce, reconcile, unwrap } from "solid-js/store"
 import { applyTimelineItem, dropStaleCompactions, type AgentTimelineItem } from "./timeline"
 
 export type { PaseoAgent }
@@ -167,8 +167,6 @@ const PAGE = 300
 
 /** Bumped on every open, so a reply for an earlier open (even of the same session) is dropped. */
 let opened = 0
-/** Bumped when a refetch rewrites the rows in place (same array), so an older page fetched before it is dropped. */
-let refetched = 0
 let older: Promise<boolean> | undefined
 
 /** Prepends the previous page of history (the newest PAGE entries load on open). Concurrent calls share one request. */
@@ -181,11 +179,10 @@ export function loadOlder() {
 
 async function fetchOlder() {
   const open = opened
-  const replaced = refetched
   const { agentId, startCursor, hasOlder, rows } = timeline
   if (!agentId || !startCursor || !hasOlder) return false
   const page = await api.agents.ref(agentId).timeline.refetch({ direction: "before", cursor: startCursor, limit: PAGE, projection: "projected" })
-  if (open !== opened || timeline.rows !== rows || refetched !== replaced) return false
+  if (open !== opened || timeline.rows !== rows) return false
   setTimeline(
     produce((draft) => {
       const entries = dropStaleCompactions(page.entries)
@@ -198,6 +195,35 @@ async function fetchOlder() {
     }),
   )
   return page.entries.length > 0
+}
+
+/** Who a row is across refetches: a message by its id, a tool call by its call id; other rows have no identity. */
+function rowKey(item: AgentTimelineItem) {
+  if (item.type === "tool_call") return `tool:${item.callId}`
+  if ((item.type === "user_message" || item.type === "assistant_message") && item.messageId) return `${item.type}:${item.messageId}`
+}
+
+/**
+ * The rows after a refetch. A row keeps its store node (and whatever views or confirmations hold it) only for the same
+ * logical item, found by id wherever the window moved it; it is updated in place via `merges`. Everything else is
+ * replaced, so a shifted window can't rewrite a held row into a different message.
+ */
+export function keepRows(previous: readonly AgentTimelineItem[], items: readonly AgentTimelineItem[]) {
+  const retained = new Map<string, AgentTimelineItem[]>()
+  for (const row of previous) {
+    const key = rowKey(row)
+    if (key) retained.set(key, [...(retained.get(key) ?? []), row])
+  }
+  const merges: [number, AgentTimelineItem][] = []
+  const rows = items.map((item, index) => {
+    // The same id can repeat (one provider message split around tool calls), so they match in order.
+    const key = rowKey(item)
+    const match = key ? retained.get(key)?.shift() : undefined
+    if (!match) return item
+    merges.push([index, item])
+    return match
+  })
+  return { rows, merges }
 }
 
 function itemMark(item: AgentTimelineItem, at: number): Mark {
@@ -367,10 +393,10 @@ export async function openTimeline(agentId: string | undefined) {
       if (open !== opened || current !== loads) return
       lastSeq = page.endCursor?.seq ?? 0
       const entries = dropStaleCompactions(page.entries)
-      refetched++
-      // Merged in place by position, so rows a reconnect refetch left unchanged keep their store nodes (and mounted views).
       batch(() => {
-        setTimeline("rows", reconcile(entries.map((entry) => entry.item), { merge: true }))
+        const { rows, merges } = keepRows(unwrap(timeline.rows), entries.map((entry) => entry.item))
+        setTimeline("rows", rows)
+        for (const [index, item] of merges) setTimeline("rows", index, reconcile(item, { merge: true }))
         setTimeline("times", reconcile(entries.map((entry) => Date.parse(entry.timestamp)), { merge: true }))
         setTimeline("marks", reconcile(entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))), { merge: true }))
         setTimeline({
