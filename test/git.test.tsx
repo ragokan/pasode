@@ -87,6 +87,34 @@ test("lists the changed files with +/− counts and shows the selected file's di
   expect(out).not.toContain("new src/a.ts")
 })
 
+test("] and [ jump the diff pane between hunks", async () => {
+  const lines = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => ({ type: "context", content: `${prefix} ctx ${i}` }))
+  const long = file("long.ts", 2, 0, {
+    hunks: [
+      { oldStart: 1, oldCount: 29, newStart: 1, newCount: 30, lines: [{ type: "header", content: "@@ -1,29 +1,30 @@" }, { type: "add", content: "FIRST HUNK MARKER" }, ...lines("first", 29)] },
+      { oldStart: 100, oldCount: 29, newStart: 101, newCount: 30, lines: [{ type: "header", content: "@@ -100,29 +101,30 @@" }, { type: "add", content: "SECOND HUNK MARKER" }, ...lines("second", 29)] },
+    ],
+  })
+  screen = await testRender(() => <><ChangesView /><DialogHost /></>, { width: 120, height: 24 })
+  openChanges()
+  await screen.renderOnce()
+  push({ files: [long] })
+  await screen.renderOnce()
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  expect(frame()).toContain("FIRST HUNK MARKER")
+  expect(frame()).not.toContain("SECOND HUNK MARKER")
+  await type("]")
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  expect(frame()).toContain("SECOND HUNK MARKER")
+  expect(frame()).not.toContain("FIRST HUNK MARKER")
+  await type("[")
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  expect(frame()).toContain("FIRST HUNK MARKER")
+})
+
 test("it is modal: keys never reach what's underneath, and escape closes it and unsubscribes", async () => {
   const underneath = mock(() => {})
   screen = await testRender(() => {
@@ -105,6 +133,17 @@ test("it is modal: keys never reach what's underneath, and escape closes it and 
   expect(subscriptions[0]!.release).toHaveBeenCalledTimes(1)
   screen.mockInput.pressKey("x")
   expect(underneath).toHaveBeenCalledTimes(1)
+})
+
+test("the view closes for good when its session goes away", async () => {
+  await open()
+  expect(frame()).toContain("Changes")
+  setAgentId(undefined)
+  await screen!.renderOnce()
+  expect(frame()).not.toContain("Changes")
+  setAgentId("g1")
+  await screen!.renderOnce()
+  expect(frame()).not.toContain("Changes")
 })
 
 test("tab compares committed work against the base branch (a new subscription), and back", async () => {
@@ -225,7 +264,7 @@ test("sidebar Git section: branch with ahead/behind and live change counts; hidd
   screen = await testRender(() => {
     void loadPlugins(useRenderer(), sidebarFeatures)
     return <Sidebar agent={agent} />
-  }, { width: 40, height: 30 })
+  }, { width: 40, height: 60 })
   await screen.renderOnce()
   await Bun.sleep(0)
   await screen.renderOnce()
@@ -235,6 +274,7 @@ test("sidebar Git section: branch with ahead/behind and live change counts; hidd
   push({ files })
   await screen.renderOnce()
   expect(frame()).toContain("+4 −5 · 3 files")
+  expect(frame().indexOf("Context")).toBeLessThan(frame().indexOf("Git"))
   expect(frame().indexOf("Git")).toBeLessThan(frame().indexOf("Speed"))
   push({ files: [files[0]!] })
   await screen.renderOnce()

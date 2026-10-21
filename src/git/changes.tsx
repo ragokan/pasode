@@ -19,6 +19,8 @@ export const closeChanges = () => setOpen(false)
 
 /** Mounted once by App; shows while open and a session is active. */
 export function ChangesView() {
+  // A session that goes away closes the view for good, so the next session doesn't open into it.
+  createEffect(() => !current() && setOpen(false))
   return <Show when={open() ? current()?.cwd : undefined}>{(cwd) => <Changes cwd={cwd()} />}</Show>
 }
 
