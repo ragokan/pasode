@@ -95,7 +95,7 @@ function LiveSessions(props: { onHistory: () => void }) {
           match: (key) => key.ctrl && key.name === "f",
           run: (option) => void actions.pin(option.value),
         },
-        { label: "tab", title: "history", match: (key) => key.name === "tab", run: props.onHistory },
+        { label: "tab", title: "history", match: (key) => key.name === "tab", run: props.onHistory, global: true },
       ]}
     />
   )
@@ -133,9 +133,10 @@ function HistorySessions(props: { onBack: () => void }) {
       } catch (error) {
         return showError(error)
       }
-      adopt({ ...agent, archivedAt: null })
       notify("Restored from the archive", "success")
     }
+    // The live list holds only the daemon's first 200 agents (and no archived ones): whatever opens must be in it.
+    adopt(agent.archivedAt ? { ...agent, archivedAt: null } : agent)
     navigate(agent.id)
   }
   return (
@@ -153,7 +154,7 @@ function HistorySessions(props: { onBack: () => void }) {
       )}
       onFilter={filter}
       onSelect={(option) => void open(option.value)}
-      actions={[{ label: "tab", title: "sessions", match: (key) => key.name === "tab", run: props.onBack }]}
+      actions={[{ label: "tab", title: "sessions", match: (key) => key.name === "tab", run: props.onBack, global: true }]}
     />
   )
 }

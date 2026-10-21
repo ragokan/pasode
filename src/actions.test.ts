@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { canRedo, cycleAgent, cycleChild, exportTranscript, fork, pin, redo, revertBlocker, revertTo } from "./actions"
+import { canRedo, chooseMessage, cycleAgent, cycleChild, exportTranscript, fork, pin, redo, revertBlocker, revertTo } from "./actions"
 import { dialogs } from "./dialog"
 import { agents, api, daemon, openTimeline, setAgents, setTimeline, timeline, workspacePins, type PaseoAgent } from "./paseo"
 import { agentId, draft, setAgentId, setDraft, setPref, setToast, toast } from "./state"
@@ -76,6 +76,8 @@ for (const change of ["replaced", "switched", "switched while prompting", "compl
   })
 }
 
+const pick = (index: number) => chooseMessage(timeline.rows[index] as never)!
+
 // A session of three prompts; the provider supports rewinding as `capabilities` says.
 const session = (capabilities: Partial<NonNullable<PaseoAgent["capabilities"]>>) => {
   const rows = [
@@ -99,7 +101,7 @@ test("revert to a middle message rewinds there, restores its text and queues eve
   const ref = spyOn(api.agents, "ref").mockImplementation(() => ({ send: async (text: string) => void sent.push(text) }) as never)
   try {
     const restored: string[] = []
-    await revertTo(timeline.rows[2] as never, (text) => restored.push(text))
+    await revertTo(pick(2), (text) => restored.push(text))
     expect(confirm.mock.calls[0]![1]).toBe("Rewind 2 messages and roll back their file edits? Paseo can't restore the replies afterwards.")
     expect(rewound).toEqual([["rw", "m2", "both"]])
     expect(restored).toEqual(["second"])
@@ -122,13 +124,13 @@ test("Codex rewinds the conversation only, and a provider that can't rewind says
   const confirm = spyOn(dialogs, "confirm").mockResolvedValue(true)
   try {
     session({ supportsRewindConversation: true })
-    await revertTo(timeline.rows[4] as never, () => {})
+    await revertTo(pick(4), () => {})
     expect(rewind.mock.calls).toEqual([["rw", "m3", "conversation"]])
     expect(toast()?.message).toBe("Undid the last message (files unchanged)")
     rewind.mockClear()
     session({})
     expect(revertBlocker(agents.rw!, timeline.rows[2] as never)).toBe("claude sessions can't rewind")
-    await revertTo(timeline.rows[2] as never, () => {})
+    await revertTo(pick(2), () => {})
     expect(rewind).not.toHaveBeenCalled()
     expect(toast()).toMatchObject({ variant: "warning", message: "claude sessions can't rewind" })
   } finally {
@@ -150,7 +152,7 @@ test("fork from a message stops the history at the row before it and puts the me
   const context = spyOn(daemon, "buildAgentForkContext").mockImplementation(async (_id, options) => (built.push(options), { attachment: { type: "text", text: "summary" } }) as never)
   try {
     const restored: string[] = []
-    await fork({ row: timeline.rows[2] as never, restore: (text) => restored.push(text) })
+    await fork({ chosen: pick(2), restore: (text) => restored.push(text) })
     // "second" is prompt seq 3: the row before it ends at seq 4 in this fake, so the boundary comes from that fetch.
     expect(fetched).toEqual([{ direction: "before", cursor: { epoch: "e", seq: 3 }, limit: 1, projection: "projected" }])
     expect(built).toEqual([{ boundaryCursor: { epoch: "e", seq: 4 } }])
@@ -169,7 +171,7 @@ test("fork from a message stops the history at the row before it and puts the me
     setTimeline("times", [1000, 1001, 1002, 1003, 1004])
     page.mockImplementation(async () => ({ reset: false, epoch: "e", entries: [] }) as never)
     built.length = 0
-    await fork({ row: timeline.rows[0] as never, restore: (text) => restored.push(text) })
+    await fork({ chosen: pick(0), restore: (text) => restored.push(text) })
     expect(built).toEqual([])
     expect(draft()).toMatchObject({ cwd: "/tmp", fork: undefined })
     expect(restored).toEqual(["second", "first"])
@@ -213,6 +215,70 @@ test("pinning a lone session's workspace asks the daemon and records it; a share
   } finally {
     pinned.mockRestore()
     setAgents({})
+    setToast(undefined)
+  }
+})
+
+test("revert rewinds the message that was chosen even if a refetch rewrites the row, or moves it, while the confirmation is up", async () => {
+  session({ supportsRewindBoth: true })
+  const rewound: unknown[][] = []
+  const rewind = spyOn(daemon, "rewindAgent").mockImplementation(async (...args) => (rewound.push(args), { ok: true, error: null, requestId: "r", agentId: "rw" }))
+  let answer!: (ok: boolean) => void
+  const confirm = spyOn(dialogs, "confirm").mockImplementation(() => new Promise((resolve) => (answer = resolve)))
+  try {
+    const restored: string[] = []
+    // A reconnect refetch merges rows in place: the row object the dialog holds now carries another prompt.
+    let reverting = revertTo(pick(2), (text) => restored.push(text))
+    setTimeline("rows", 2, { messageId: "m9", text: "someone else's prompt" } as never)
+    answer(true)
+    await reverting
+    expect(rewound).toEqual([])
+    expect(restored).toEqual([])
+    expect(toast()).toMatchObject({ variant: "warning", message: "That message is no longer in the session" })
+
+    // Older history prepended meanwhile only moves the row: the same message is still the target.
+    session({ supportsRewindBoth: true })
+    setToast(undefined)
+    reverting = revertTo(pick(2), (text) => restored.push(text))
+    setTimeline("rows", (rows) => [{ type: "user_message", text: "older", messageId: "m0" } as never, ...rows])
+    setTimeline("times", (times) => [999, ...times])
+    answer(true)
+    await reverting
+    expect(rewound).toEqual([["rw", "m2", "both"]])
+    expect(restored).toEqual(["second"])
+
+    // Switching to another session during the confirmation drops it.
+    session({ supportsRewindBoth: true })
+    rewound.length = 0
+    reverting = revertTo(pick(2), () => {})
+    setAgentId(undefined)
+    answer(true)
+    await reverting
+    expect(rewound).toEqual([])
+  } finally {
+    rewind.mockRestore()
+    confirm.mockRestore()
+    setAgentId(undefined)
+    setToast(undefined)
+  }
+})
+
+test("fork stops when the chosen message changes while the daemon is asked for its position", async () => {
+  session({})
+  let answer!: (page: never) => void
+  const list = spyOn(daemon, "listAgentTimelinePrompts").mockImplementation(() => new Promise((resolve) => (answer = resolve as never)))
+  const context = spyOn(daemon, "buildAgentForkContext")
+  try {
+    const forking = fork({ chosen: pick(2), restore: () => {} })
+    setTimeline("rows", 2, { messageId: "m9", text: "someone else's prompt" } as never)
+    answer({ epoch: "e", prompts: [] } as never)
+    await forking
+    expect(context).not.toHaveBeenCalled()
+    expect(toast()).toMatchObject({ variant: "error", message: "That message is no longer in the session" })
+  } finally {
+    list.mockRestore()
+    context.mockRestore()
+    setAgentId(undefined)
     setToast(undefined)
   }
 })

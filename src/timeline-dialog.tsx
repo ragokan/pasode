@@ -7,9 +7,7 @@ import { matchedPrompts, promptKeys, promptPreview, userRowKeys, type Prompt } f
 import { daemon, loadOlder, timeline } from "./paseo"
 import { Spinner } from "./session"
 import { current, notify, showError, subagent } from "./state"
-import type { AgentTimelineItem } from "./timeline"
 
-type UserRow = Extract<AgentTimelineItem, { type: "user_message" }>
 type Handlers = { scrollToRow: (index: number) => void; restore: (text: string) => void }
 
 const stamp = (iso: string) => {
@@ -100,7 +98,9 @@ export function TimelineDialog(props: Handlers) {
       if (dialog.isOpen) return
     }
     const row = timeline.rows[index]
-    if (row?.type === "user_message") dialog.replace(() => <MessageActions row={row} {...props} />, "large")
+    // Snapshot now: a refetch rewrites loaded rows in place while the dialogs are open.
+    const chosen = row?.type === "user_message" ? actions.chooseMessage(row) : undefined
+    if (chosen) dialog.replace(() => <MessageActions chosen={chosen} {...props} />, "large")
   }
 
   return (
@@ -124,32 +124,36 @@ export function TimelineDialog(props: Handlers) {
   )
 }
 
-function MessageActions(props: Handlers & { row: UserRow }) {
-  const index = () => timeline.rows.indexOf(props.row)
+function MessageActions(props: Handlers & { chosen: actions.Chosen }) {
   const readOnly = () => (subagent() ? "read-only subagent view" : undefined)
   const agent = current()
   const choices = [
     {
       title: "Jump to message",
       description: "view message in session",
-      run: () => (dialog.clear(), index() < 0 ? notify("That message is no longer loaded", "warning") : props.scrollToRow(index())),
+      run: () => {
+        dialog.clear()
+        const index = actions.locateMessage(props.chosen)
+        if (index < 0) actions.gone()
+        else props.scrollToRow(index)
+      },
     },
     {
       title: "Revert to here",
       description: "undo this message and everything after",
-      blocked: readOnly() ?? (agent ? actions.revertBlocker(agent, props.row) : "no session"),
-      run: () => (dialog.clear(), void actions.revertTo(props.row, props.restore)),
+      blocked: readOnly() ?? (agent ? actions.revertBlocker(agent, props.chosen) : "no session"),
+      run: () => (dialog.clear(), void actions.revertTo(props.chosen, props.restore)),
     },
     {
       title: "Copy",
       description: "message text to clipboard",
-      run: () => (dialog.clear(), void actions.copyText(props.row.text).then(() => notify("Copied message", "success"), showError)),
+      run: () => (dialog.clear(), void actions.copyText(props.chosen.text).then(() => notify("Copied message", "success"), showError)),
     },
     {
       title: "Fork from here",
       description: "new session with the history before this message",
       blocked: readOnly(),
-      run: () => (dialog.clear(), void actions.fork({ row: props.row, restore: props.restore })),
+      run: () => (dialog.clear(), void actions.fork({ chosen: props.chosen, restore: props.restore })),
     },
   ]
   return (

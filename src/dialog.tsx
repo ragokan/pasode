@@ -77,6 +77,8 @@ export interface SelectAction<T> {
   title: string
   match: (key: KeyEvent) => boolean
   run: (option: SelectOption<T>, key: KeyEvent) => void
+  /** Runs with nothing selected too (an empty list); `run` must not use its option then. */
+  global?: boolean
 }
 
 export function DialogSelect<T>(props: {
@@ -111,19 +113,37 @@ export function DialogSelect<T>(props: {
   const rows = createMemo(() => filtered().length + filtered().filter((_, index) => heading(index)).length * 2)
   const height = createMemo(() => Math.max(1, Math.min(rows(), Math.floor(dimensions().height / 2) - 6)))
 
+  // The selection follows its option, not its row: a live list reorders under the cursor (pins, activity).
+  let selectedValue: T | undefined
+  const select = (index: number) => {
+    setSelected(index)
+    selectedValue = filtered()[index]?.value
+  }
   createEffect(
     on(filter, () => {
       const index = filter() ? 0 : Math.max(0, filtered().findIndex((option) => option.value === props.current))
       moveTo(index)
+      // A list the caller filters is replaced by the search, so the cursor starts at the top of the new one.
+      if (props.onFilter) selectedValue = undefined
     }),
+  )
+  createEffect(
+    on(
+      filtered,
+      (list) => {
+        const at = selectedValue === undefined ? -1 : list.findIndex((option) => option.value === selectedValue)
+        if (at >= 0 && at !== selected()) setSelected(at)
+      },
+      { defer: true },
+    ),
   )
   // Keep the cursor inside the list when options change underneath it (live session updates).
   createEffect(() => {
-    if (selected() >= filtered().length) setSelected(Math.max(0, filtered().length - 1))
+    if (selected() >= filtered().length) select(Math.max(0, filtered().length - 1))
   })
 
   function moveTo(index: number) {
-    setSelected(index)
+    select(index)
     const option = filtered()[index]
     if (option) props.onMove?.(option)
     setTimeout(() => scroll?.scrollChildIntoView(`dialog-option-${index}`), 0)
@@ -147,7 +167,7 @@ export function DialogSelect<T>(props: {
       if (key.name === "return") return submit(), true
       const action = props.actions?.find((item) => item.match(key))
       const option = filtered()[selected()]
-      if (action && option) return action.run(option, key), true
+      if (action && (option || action.global)) return action.run(option as SelectOption<T>, key), true
       return false
     })()
     if (handled) key.preventDefault()
@@ -214,7 +234,7 @@ export function DialogSelect<T>(props: {
                     paddingLeft={isCurrent() || option().gutter ? 1 : 3}
                     paddingRight={3}
                     backgroundColor={active() ? (option().bg ?? theme.primary) : RGBA.fromInts(0, 0, 0, 0)}
-                    onMouseOver={() => setSelected(index())}
+                    onMouseOver={() => select(index())}
                     onMouseUp={() => submit(option())}
                   >
                     <Show when={option().gutter} fallback={<Show when={isCurrent()}><text fg={fg()}>●</text></Show>}>
