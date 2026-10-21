@@ -150,11 +150,13 @@ test("an open provider subagent applies pushed items incrementally, dropping wha
   expect(timeline.agentId).toBe("p:c")
   expect(texts()).toEqual(["one", "two three"])
   const rows = timeline.rows
+  const revision = timeline.revision
   feed.update(timelineUpdate(4, "!"))
   feed.update(timelineUpdate(4, "!")) // a duplicate seq is ignored
   feed.update(timelineUpdate(9, "other", { subagentId: "elsewhere" }))
   expect(texts()).toEqual(["one", "two three!"])
   expect(timeline.rows).toBe(rows) // folded into the existing rows, not replaced
+  expect(timeline.revision).toBeGreaterThan(revision) // so the transcript's memos regroup
   expect(fetch).toHaveBeenCalledTimes(1)
   // A new epoch means the history was rewritten: read it again.
   fetch.mockResolvedValue({ rows: [row(1, "fresh")], epoch: "e2", error: null } as never)

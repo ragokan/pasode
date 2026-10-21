@@ -233,7 +233,7 @@ export async function openSubagentTimeline(parentId: string, subagentId: string)
   const open = ++opened
   older = undefined
   const key = `${parentId}:${subagentId}`
-  setTimeline({ agentId: key, rows: [], times: [], marks: [], loading: true, hasOlder: false, startCursor: undefined })
+  setTimeline({ agentId: key, rows: [], revision: timeline.revision + 1, times: [], marks: [], loading: true, hasOlder: false, startCursor: undefined })
   let lastSeq = 0
   let epoch: string | undefined
   // Pushed items buffer until the first page lands; those it already holds are dropped by seq.
@@ -246,6 +246,7 @@ export async function openSubagentTimeline(parentId: string, subagentId: string)
         const before = draft.rows.length
         applyTimelineItem(draft.rows, update.item)
         if (draft.rows.length > before) draft.times.push(Date.parse(update.timestamp))
+        draft.revision++
       }),
     )
   }
@@ -257,6 +258,7 @@ export async function openSubagentTimeline(parentId: string, subagentId: string)
     epoch = page.epoch
     setTimeline({
       rows: page.rows.map((row) => row.item),
+      revision: timeline.revision + 1,
       times: page.rows.map((row) => Date.parse(row.timestamp)),
       loading: false,
     })
