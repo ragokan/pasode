@@ -58,6 +58,19 @@ test("diagnostics run on demand for the chosen provider", async () => {
   expect(screen!.captureCharFrame()).toContain("Version: 2.1.306")
 })
 
+test("a failed diagnostic shows its error in the dialog instead of throwing", async () => {
+  mocks.push(spyOn(daemon, "getProviderDiagnostic").mockRejectedValue(new Error("Transport not connected")))
+  await open()
+  screen!.mockInput.pressKey("d")
+  await screen!.renderOnce()
+  screen!.mockInput.pressEnter() // Claude Code
+  await Bun.sleep(0)
+  await screen!.renderOnce()
+  const frame = screen!.captureCharFrame()
+  expect(frame).toContain("Claude Code diagnostics")
+  expect(frame).toContain("Transport not connected")
+})
+
 test("restart and update ask first, and Cancel does nothing", async () => {
   const restart = spyOn(daemon, "restartServer").mockResolvedValue({ status: "restart_requested", requestId: "r", clientId: "c" } as never)
   const update = spyOn(daemon, "updateDaemon").mockResolvedValue({ requestId: "r", success: true, error: null, previousVersion: "0.12.0", newVersion: "0.13.0" })

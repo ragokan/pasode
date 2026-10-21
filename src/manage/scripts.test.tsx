@@ -40,7 +40,7 @@ test("setup progress counts finished commands", () => {
   expect(setupLabel(setup("failed", []))).toBe("setup failed")
 })
 
-test("/scripts lists the session workspace's scripts live; enter starts, x stops, the setup row runs setup", async () => {
+test("/scripts lists the session workspace's scripts live; enter starts, x stops, setup progress is in the title", async () => {
   const observers: { update(message: unknown): void; snapshot(): void }[] = []
   const released: string[] = []
   mocks.push(
@@ -63,8 +63,8 @@ test("/scripts lists the session workspace's scripts live; enter starts, x stops
   await Bun.sleep(0)
   await screen.renderOnce()
   let frame = screen.captureCharFrame()
-  expect(frame).toContain("Scripts")
-  expect(frame).toMatch(/Run workspace setup\s+setup done/)
+  expect(frame).toContain("Scripts · setup done")
+  expect(frame).not.toContain("Run setup") // a trusted workspace has no setup to run from here
   expect(frame).toMatch(/web\s+service\s+stopped/)
   expect(frame).toMatch(/api\s+service · :4000\s+running · healthy/)
 
@@ -77,12 +77,11 @@ test("/scripts lists the session workspace's scripts live; enter starts, x stops
   expect(frame).not.toContain("api")
   observers[0]!.update({ type: "workspace_setup_progress", payload: { workspaceId: "w1", status: "running", error: null, detail: { type: "worktree_setup", worktreePath: "/x", branchName: "b", log: "", commands: [{ index: 0, command: "bun i", cwd: "/x", status: "running", exitCode: null }] } } })
   await screen.renderOnce()
-  expect(screen.captureCharFrame()).toMatch(/Run workspace setup\s+setup running 0\/1/)
+  expect(screen.captureCharFrame()).toContain("Scripts · setup running 0/1")
 
   observers[0]!.update({ type: "script_status_update", payload: { workspaceId: "w1", scripts: [script("web"), script("api", { lifecycle: "running", port: 4000, terminalId: "t1" })] } })
   await screen.renderOnce()
-  screen.mockInput.pressArrow("down") // web
-  screen.mockInput.pressEnter()
+  screen.mockInput.pressEnter() // web
   await Bun.sleep(0)
   expect(started).toHaveBeenCalledWith("w1", "web")
   expect(toast()?.message).toBe("Started web")
@@ -93,11 +92,53 @@ test("/scripts lists the session workspace's scripts live; enter starts, x stops
   await Bun.sleep(0)
   expect(stopped).toHaveBeenCalledWith("w1", "api")
 
-  screen.mockInput.pressArrow("up")
-  screen.mockInput.pressArrow("up")
-  screen.mockInput.pressEnter() // the setup row
+  expect(setup).not.toHaveBeenCalled()
+})
+
+const blocked = {
+  status: "blocked",
+  detail: { type: "worktree_setup", worktreePath: "/x", branchName: "b", log: "", commands: [] },
+  error: null,
+  blockedSource: { kind: "change_request", forge: "github", number: 42, headRepository: "mallory/app" },
+} as never
+
+test("a PR workspace whose setup was blocked offers Run setup, after a confirm that names the source; the daemon's started:false is reported", async () => {
+  mocks.push(
+    spyOn(api, "observeEvents").mockImplementation((() => ({ subscribe: () => () => {}, release: async () => {} })) as never),
+    spyOn(daemon, "listWorkspaceScripts").mockResolvedValue({ requestId: "r", workspaceId: "w1", scripts: [script("web")], error: null }),
+    spyOn(daemon, "fetchWorkspaceSetupStatus").mockResolvedValue({ requestId: "r", workspaceId: "w1", snapshot: blocked }),
+  )
+  const setup = spyOn(daemon, "runWorkspaceSetup").mockResolvedValue({ requestId: "r", workspaceId: "w1", started: false, error: null })
+  mocks.push(setup)
+  setAgents({ a: { id: "a", workspaceId: "w1", title: "A", provider: "claude", cwd: "/x" } as PaseoAgent })
+  setAgentId("a")
+
+  screen = await testRender(() => <DialogHost />, { width: 100, height: 30 })
+  openScripts()
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  expect(screen.captureCharFrame()).toMatch(/Scripts · setup blocked/)
+  expect(screen.captureCharFrame()).toMatch(/Run setup\s+PR #42 from mallory\/app/)
+
+  screen.mockInput.pressEnter() // the first row
+  await screen.renderOnce()
+  const frame = screen.captureCharFrame().replace(/\s+/g, " ") // the message wraps
+  expect(frame).toContain("This PR comes from mallory/app, a different repository.")
+  expect(frame).toContain("could run code you have not reviewed")
+  expect(setup).not.toHaveBeenCalled()
+  screen.mockInput.pressArrow("left") // Cancel
+  screen.mockInput.pressEnter()
+  await Bun.sleep(0)
+  expect(setup).not.toHaveBeenCalled()
+  await screen.renderOnce()
+  expect(screen.captureCharFrame()).toContain("Scripts") // back on the list
+
+  screen.mockInput.pressEnter()
+  await screen.renderOnce()
+  screen.mockInput.pressEnter() // Run setup
   await Bun.sleep(0)
   expect(setup).toHaveBeenCalledWith("w1")
+  expect(toast()).toMatchObject({ variant: "error", message: expect.stringContaining("didn't start") })
 })
 
 test("without a session there is no workspace to list", () => {
