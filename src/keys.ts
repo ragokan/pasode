@@ -21,16 +21,18 @@ export function parseBinding(spec: string | undefined, leader = "ctrl+x"): Strok
         .filter(Boolean)
         .map(parseStroke),
     )
-    .filter((sequence) => sequence.length > 0)
+    // A typo'd modifier (control+x) drops its alternative rather than binding bare x, which would fire while typing.
+    .filter((sequence): sequence is Stroke[] => sequence.length > 0 && !sequence.includes(undefined))
 }
 
-function parseStroke(token: string): Stroke {
+function parseStroke(token: string): Stroke | undefined {
   const stroke: Stroke = { name: "", ctrl: false, shift: false, meta: false, super: false }
   const parts = token.toLowerCase().split("+")
   stroke.name = aliases[parts.at(-1)!] ?? parts.at(-1)!
   for (const part of parts.slice(0, -1)) {
     const modifier = aliases[part] ?? part
-    if (modifier === "ctrl" || modifier === "shift" || modifier === "meta" || modifier === "super") stroke[modifier] = true
+    if (modifier !== "ctrl" && modifier !== "shift" && modifier !== "meta" && modifier !== "super") return undefined
+    stroke[modifier] = true
   }
   return stroke
 }

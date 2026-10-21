@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
+import { lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { listClaudeMcp, listCodexMcp, mcpCounts, setClaudeMcp, setTomlEnabled, parseClaudeMcpList } from "./mcp"
+import { listClaudeMcp, listCodexMcp, mcpCounts, setClaudeMcp, setMcpEnabled, setTomlEnabled, parseClaudeMcpList } from "./mcp"
 
 test("claude: lists scopes and toggles projects[cwd].disabledMcpServers in place", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
@@ -77,4 +77,32 @@ test("home footer counts: enabled servers only; unchecked providers count enable
   ] as const
   expect(mcpCounts([...servers], { cua: "connected", browseros: "failed", off: "connected" }, true)).toEqual({ total: 2, connected: 1, failed: 1 })
   expect(mcpCounts([...servers], {}, false)).toEqual({ total: 2, connected: 2, failed: 0 })
+})
+
+test("toggles write through a symlinked config instead of replacing the link", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+  const target = path.join(dir, "dotfiles.json")
+  const link = path.join(dir, ".claude.json")
+  await writeFile(target, JSON.stringify({ mcpServers: { a: {} } }))
+  await symlink(target, link)
+  await setClaudeMcp(link, "/repo", "a", false)
+  expect((await lstat(link)).isSymbolicLink()).toBe(true)
+  expect(JSON.parse(await readFile(target, "utf8")).projects["/repo"].disabledMcpServers).toEqual(["a"])
+  await rm(dir, { recursive: true })
+})
+
+test("codex: concurrent toggles both land", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+  const env = { PASEO_HOME: process.env.PASEO_HOME, CODEX_HOME: process.env.CODEX_HOME }
+  process.env.PASEO_HOME = dir
+  process.env.CODEX_HOME = dir
+  try {
+    await writeFile(path.join(dir, "config.toml"), "[mcp_servers.a]\ncommand = \"a\"\n\n[mcp_servers.b]\ncommand = \"b\"\n")
+    await Promise.all([setMcpEnabled("codex", dir, "a", false), setMcpEnabled("codex", dir, "b", false)])
+    expect(listCodexMcp(await readFile(path.join(dir, "config.toml"), "utf8")).map((server) => server.enabled)).toEqual([false, false])
+  } finally {
+    await rm(dir, { recursive: true })
+    for (const [key, value] of Object.entries(env)) if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
 })

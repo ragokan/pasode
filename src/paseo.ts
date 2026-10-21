@@ -111,12 +111,24 @@ export const [timeline, setTimeline] = createStore<{
 
 const PAGE = 300
 
-/** Prepends the previous page of history (the newest PAGE entries load on open). */
-export async function loadOlder() {
-  const { agentId, startCursor, hasOlder } = timeline
+/** Bumped on every open, so a reply for an earlier open (even of the same session) is dropped. */
+let opened = 0
+let older: Promise<boolean> | undefined
+
+/** Prepends the previous page of history (the newest PAGE entries load on open). Concurrent calls share one request. */
+export function loadOlder() {
+  const open = opened
+  return (older ??= fetchOlder().finally(() => {
+    if (open === opened) older = undefined
+  }))
+}
+
+async function fetchOlder() {
+  const open = opened
+  const { agentId, startCursor, hasOlder, rows } = timeline
   if (!agentId || !startCursor || !hasOlder) return false
   const page = await api.agents.ref(agentId).timeline.refetch({ direction: "before", cursor: startCursor, limit: PAGE, projection: "projected" })
-  if (timeline.agentId !== agentId) return false
+  if (open !== opened || timeline.rows !== rows) return false
   setTimeline(
     produce((draft) => {
       const entries = dropStaleCompactions(page.entries)
@@ -169,11 +181,13 @@ let closeTimeline: (() => void) | undefined
 /** Read-only timeline of a provider-native subagent; Paseo has no stream for these, so poll while open. */
 export async function openSubagentTimeline(parentId: string, subagentId: string) {
   closeTimeline?.()
+  const open = ++opened
+  older = undefined
   const key = `${parentId}:${subagentId}`
   setTimeline({ agentId: key, rows: [], times: [], marks: [], loading: true, hasOlder: false, startCursor: undefined })
   const load = async () => {
     const page = await daemon.fetchProviderSubagentTimeline(parentId, subagentId, { direction: "tail", limit: 0 })
-    if (timeline.agentId !== key) return
+    if (open !== opened) return
     if (page.error) throw new Error(page.error)
     setTimeline({
       rows: page.rows.map((row) => row.item),
@@ -189,6 +203,8 @@ export async function openSubagentTimeline(parentId: string, subagentId: string)
 export async function openTimeline(agentId: string | undefined) {
   closeTimeline?.()
   closeTimeline = undefined
+  const open = ++opened
+  older = undefined
   setTimeline({ agentId, rows: [], times: [], marks: [], loading: !!agentId, hasOlder: false, startCursor: undefined })
   if (!agentId) return
 
@@ -212,30 +228,46 @@ export async function openTimeline(agentId: string | undefined) {
       }),
     )
   }
+  // Live messages buffer while a load runs; only the newest load applies its page and flushes them.
+  let loads = 0
+  let stale = false
+  let retryAfter = 0
   const load = async () => {
+    const current = ++loads
+    stale = true
     buffered ??= []
-    const page = await handle.timeline.refetch({ direction: "before", limit: PAGE, projection: "projected" })
-    if (timeline.agentId !== agentId) return
-    lastSeq = page.endCursor?.seq ?? 0
-    const entries = dropStaleCompactions(page.entries)
-    setTimeline({
-      rows: entries.map((entry) => entry.item),
-      times: entries.map((entry) => Date.parse(entry.timestamp)),
-      marks: entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))),
-      loading: false,
-      // After a rewind the daemon reports hasOlder with no cursor to page from.
-      hasOlder: page.hasOlder && !!page.startCursor,
-      startCursor: page.startCursor ?? undefined,
-    })
-    const pending = buffered
-    buffered = undefined
-    for (const message of pending) apply(message)
+    try {
+      const page = await handle.timeline.refetch({ direction: "before", limit: PAGE, projection: "projected" })
+      if (open !== opened || current !== loads) return
+      lastSeq = page.endCursor?.seq ?? 0
+      const entries = dropStaleCompactions(page.entries)
+      setTimeline({
+        rows: entries.map((entry) => entry.item),
+        times: entries.map((entry) => Date.parse(entry.timestamp)),
+        marks: entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))),
+        // After a rewind the daemon reports hasOlder with no cursor to page from.
+        hasOlder: page.hasOlder && !!page.startCursor,
+        startCursor: page.startCursor ?? undefined,
+      })
+      stale = false
+    } finally {
+      if (open === opened && current === loads && buffered) {
+        if (stale) retryAfter = Date.now() + 3000
+        setTimeline("loading", false)
+        const pending = buffered
+        buffered = undefined
+        // Flush even on failure; a later live message retries after the cooldown.
+        for (const message of pending) apply(message)
+      }
+    }
   }
+  const reload = () => void load().catch((error) => console.error("Timeline refetch failed:", error))
 
   const unsubscribe = handle.timeline.subscribe((message) => {
     // Reconnects and history rewrites invalidate what we have; refetch.
-    if (message.event.type === "replacement" || message.event.type === "subscription_restored") return void load()
+    if (message.event.type === "replacement" || message.event.type === "subscription_restored") return reload()
     if (!("timestamp" in message)) return
+    if (stale && !buffered && Date.now() >= retryAfter) reload()
     if (buffered) buffered.push(message)
     else apply(message)
   })

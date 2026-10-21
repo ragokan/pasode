@@ -112,7 +112,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "session.timestamps", title: "Toggle timestamps", category: "View", slash: "timestamps", run: () => setPref("timestamps", !prefs.timestamps) },
     { id: "session.diffs", title: "Cycle diff style: auto / unified / split", category: "View", slash: "diffs", run: cycleDiffs },
     { id: "theme.list", title: "Switch theme", category: "View", keybind: "<leader>t", slash: "themes", run: openThemes },
-    { id: "editor.open", title: "Open prompt in $EDITOR", category: "Prompt", keybind: "<leader>e", slash: "editor", run: () => void prompt?.openEditor() },
+    { id: "editor.open", title: "Open prompt in $EDITOR", category: "Prompt", keybind: "<leader>e", slash: "editor", run: () => void prompt?.openEditor().catch(showError) },
     { id: "settings.show", title: "Open settings", category: "System", slash: "settings", run: () => dialog.replace(() => <DialogSettings />) },
     { id: "app.toggle.animations", title: "Toggle animations", category: "System", run: () => (setPref("animations", !prefs.animations), notify(`Animations: ${prefs.animations ? "on" : "off"}`)) },
     { id: "help.show", title: "Help", category: "System", keybind: "<leader>h", slash: "help", run: openHelp },
@@ -343,10 +343,14 @@ export function App(props: { initialAgentId?: string }) {
     return true
   }
   /** Unmounted rows first, then the daemon's previous page. */
+  let olderRequest: Promise<boolean> | undefined
   function showOlder() {
     if (revealOlder()) return true
     if (!timeline.hasOlder) return false
-    void loadOlder()
+    const request = loadOlder()
+    if (olderRequest === request) return true
+    olderRequest = request
+    void request
       .then((loaded) => loaded && revealOlder())
       .catch(showError)
     return true

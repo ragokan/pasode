@@ -2,7 +2,7 @@
 // Claude: projects[<cwd>].disabledMcpServers in .claude.json, the same list `claude` /mcp edits.
 // Codex: `enabled = false` under [mcp_servers.<name>] in config.toml (global).
 import { readFileSync } from "node:fs"
-import { mkdir, readFile, rename, rmdir, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, realpath, rename, rmdir, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -78,9 +78,11 @@ export function parseClaudeMcpList(text: string) {
 export async function setMcpEnabled(provider: string, cwd: string, name: string, enabled: boolean) {
   if (provider === "claude") return setClaudeMcp(claudeConfigFile(), cwd, name, enabled)
   if (provider === "codex") {
-    const file = codexConfigFile()
-    const { mode } = await stat(file)
-    return writeAtomic(file, setTomlEnabled(await readFile(file, "utf8"), name, enabled), mode)
+    const file = await realFile(codexConfigFile())
+    return locked(file, async () => {
+      const { mode } = await stat(file)
+      await writeAtomic(file, setTomlEnabled(await readFile(file, "utf8"), name, enabled), mode)
+    })
   }
   throw new Error(`MCP toggling is not supported for ${provider}`)
 }
@@ -103,7 +105,8 @@ export async function listClaudeMcp(file: string, cwd: string): Promise<McpServe
   return [...servers.values()]
 }
 
-export async function setClaudeMcp(file: string, cwd: string, name: string, enabled: boolean) {
+export async function setClaudeMcp(link: string, cwd: string, name: string, enabled: boolean) {
+  const file = await realFile(link)
   await locked(file, async () => {
     const { mode } = await stat(file).catch(() => ({ mode: 0o600 }))
     const config = await readJson(file)
@@ -147,6 +150,9 @@ async function readJson(file: string): Promise<any> {
   }
 }
 
+/** Writes go to a symlink's target (e.g. a dotfiles checkout) so the rename doesn't replace the link with a file. */
+const realFile = (file: string) => realpath(file).catch(() => file)
+
 async function writeAtomic(file: string, text: string, mode: number) {
   const temp = `${file}.${process.pid}.tmp`
   await writeFile(temp, text, { mode })
@@ -168,7 +174,7 @@ async function locked(file: string, task: () => Promise<void>) {
         await rmdir(lock).catch(() => {})
         continue
       }
-      if (tries >= 50) throw new Error(`Claude Code is holding ${file}; try again`)
+      if (tries >= 50) throw new Error(`${file} is locked by another process; try again`)
       await Bun.sleep(100)
     }
   }

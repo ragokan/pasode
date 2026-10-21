@@ -12,10 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^7"
+    "@types/bun": "1.4.2",
+    "typescript": "7.0.2"
   },
   "dependencies": {
     "@getpaseo/client": "0.11.2",

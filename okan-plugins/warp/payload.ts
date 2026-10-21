@@ -5,9 +5,11 @@ export const PLUGIN_VERSION = "0.1.8"
 
 const clean = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ")
 
-export function formatTitle(title: string | null | undefined, indicator = "") {
-  const label = clean(title || "Paseo")
-  return indicator + (label.length > 40 ? label.slice(0, 37) + "…" : label)
+// ocode's title.ts: a full-width Warp tab shows about 32-34 characters and cuts longer titles at the start.
+export const WARP_TITLE_MAX = 27
+
+export function formatTitle(title: string | null | undefined, indicator = "", max = 40) {
+  return indicator + truncate(clean(title || "Paseo"), max)
 }
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -37,4 +39,8 @@ export function richSequence(event: string, agent: { id: string; cwd: string }, 
   return `\x1b]777;notify;warp://cli-agent;${clean(body)}\x07`
 }
 
-export const truncate = (text: string, max: number) => (text.length > max ? text.slice(0, max - 1) + "…" : text)
+/** Cuts by grapheme, so an emoji (surrogate pair or ZWJ sequence) is never split. */
+export function truncate(text: string, max: number) {
+  const graphemes = Array.from(new Intl.Segmenter().segment(text), (part) => part.segment)
+  return graphemes.length > max ? graphemes.slice(0, max - 1).join("") + "…" : text
+}

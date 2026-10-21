@@ -109,6 +109,8 @@ test("a delayed stop never carries another session's transcript; off-screen sess
       // Paseo's post-first-message rename reaches the terminal title.
       setWorkspaceTitle("Generated title")
       assert.equal(titles.at(-1), "Generated title")
+      setWorkspaceTitle("x".repeat(40))
+      assert.equal(titles.at(-1), "x".repeat(26) + "…")
     `],
     cwd: host,
     env: { ...process.env, TERM_PROGRAM: "WarpTerminal", WARP_CLI_AGENT_PROTOCOL_VERSION: "1" },
@@ -193,8 +195,13 @@ test("in Kaku: an animated spinner while running, one notification per event for
   expect(result.exitCode).toBe(0)
 }, 15_000)
 
-test("titles remove controls and keep ocode's 40-character label limit", () => {
+test("titles remove controls and keep ocode's label limits: 40, or 27 in Warp", () => {
   expect(formatTitle("hello\x1b\x07\x9cworld", "• ")).toBe("• hello   world")
-  expect(formatTitle("x".repeat(41), "🟡 ")).toBe("🟡 " + "x".repeat(37) + "…")
+  expect(formatTitle("x".repeat(40), "🟡 ")).toBe("🟡 " + "x".repeat(40))
+  expect(formatTitle("x".repeat(41), "🟡 ")).toBe("🟡 " + "x".repeat(39) + "…")
+  expect(formatTitle("x".repeat(28), "", 27)).toBe("x".repeat(26) + "…")
+  // An emoji at the cut stays whole instead of leaving half a surrogate pair.
+  expect(formatTitle("x".repeat(36) + "😀".repeat(5), "")).toBe("x".repeat(36) + "😀".repeat(3) + "…")
+  expect(formatTitle("x".repeat(38) + "👩‍💻👩‍💻y", "")).toBe("x".repeat(38) + "👩‍💻…")
   expect(formatTitle(null)).toBe("Paseo")
 })

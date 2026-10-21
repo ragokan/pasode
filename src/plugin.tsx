@@ -109,6 +109,7 @@ export async function loadPlugins(renderer: CliRenderer, features: PasodePlugin[
   for (const feature of features) runWithOwner(owner, () => createRoot(() => feature.setup(context(feature.id, {}, renderer))))
   for (const spec of pluginSpecs()) {
     try {
+      if (spec.error) throw new Error(spec.error)
       const module = await import(pathToFileURL(resolveEntry(spec.path)).href)
       const exported = module.default ?? module
       // A module may export one plugin or several (like ocode's consolidated entry).

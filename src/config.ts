@@ -55,13 +55,22 @@ export const config: PasodeConfig = readJsonc(configPath)
 export function pluginSpecs() {
   return (config.plugins ?? []).map((entry) => {
     const [spec, options] = Array.isArray(entry) ? entry : [entry, {}]
+    // Reported per entry by the loader, so one bad entry doesn't skip the others.
+    if (typeof spec !== "string") return { spec: String(JSON.stringify(entry)), path: "", options: {}, error: "expected a path or [path, options]" }
     const resolved = expandHome(spec)
     return { spec, path: path.isAbsolute(resolved) ? resolved : path.resolve(configDir, resolved), options }
   })
 }
 
 /** Last runtime choices (theme, toggles), like OpenCode's kv.json; config values are the defaults. */
-const kv: Record<string, unknown> = readJsonc(statePath)
+const kv: Record<string, unknown> = (() => {
+  try {
+    const value = readJsonc(statePath)
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  } catch {
+    return {} // a torn or hand-broken file must not block every launch; prefs are best-effort
+  }
+})()
 
 export function kvGet<T>(key: string, fallback: T): T {
   return (kv[key] as T | undefined) ?? fallback

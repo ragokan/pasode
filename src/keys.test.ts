@@ -15,6 +15,7 @@ test("parses OpenCode keybind strings", () => {
   expect(parseBinding("shift+return,ctrl+j")).toEqual([[key("return", { shift: true })], [key("j", { ctrl: true })]])
   expect(parseBinding("<leader>l", "ctrl+x")).toEqual([[key("x", { ctrl: true }), key("l")]])
   expect(parseBinding("esc esc")).toEqual([[key("escape"), key("escape")]])
+  expect(parseBinding("control+x,ctl+x <leader>y,alt+x")).toEqual([[key("x", { meta: true })]])
   expect(formatBinding("<leader>l,ctrl+k")).toBe("ctrl+x l")
   expect(formatBinding("down")).toBe("↓")
   expect(formatBinding("<leader>up")).toBe("ctrl+x ↑")

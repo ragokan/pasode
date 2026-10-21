@@ -3,7 +3,7 @@
 import { writeFileSync } from "node:fs"
 import { createEffect, createSignal, onCleanup } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
-import { formatTitle, inKaku, inWarp, PLUGIN_VERSION, richSequence, SPINNER, SPINNER_MS, truncate } from "./payload"
+import { formatTitle, inKaku, inWarp, PLUGIN_VERSION, richSequence, SPINNER, SPINNER_MS, truncate, WARP_TITLE_MAX } from "./payload"
 import { createTransitions, type AgentState } from "./transitions"
 
 const HANDSHAKE_DELAY_MS = 1000
@@ -34,7 +34,7 @@ export default {
         : agent?.status === "running" ? (kaku ? SPINNER[frame() % SPINNER.length] + " " : "• ")
         : agent?.status === "error" || last === "error" ? "🔴 "
         : last === "finished" ? "✓ " : ""
-      const title = formatTitle(agent && ctx.paseo.sessionTitle(agent), indicator)
+      const title = formatTitle(agent && ctx.paseo.sessionTitle(agent), indicator, inWarp(process.env) ? WARP_TITLE_MAX : 40)
       if (title !== lastTitle) ctx.renderer.setTerminalTitle(lastTitle = title)
     })
 

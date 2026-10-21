@@ -12,6 +12,8 @@ Adaptations retain a provenance comment in every TypeScript source/test. No sour
 | `LICENSE` | Combined unchanged MIT permission/warranty text and copyright notices from reference OpenCode `LICENSE` and `~/coding/ocode/plugins/warp/LICENSE`. |
 | `AGENTS.md`, `README.md`, `SOURCES.md` | `~/coding/ocode` repository conventions adapted for this plugin folder. |
 
+`warp/payload.ts` follows ocode's `title.ts` for `WARP_TITLE_MAX` and `max - 1` + `"…"` truncation. Local deviation: `truncate` uses `Intl.Segmenter` to preserve whole graphemes.
+
 Reference OpenCode checkout: `~/.cache/paseo-tui-ref/opencode`, HEAD `388406238bd5ca15564a762840a2362c3a45bd9c`, upstream https://github.com/anomalyco/opencode. The sidebar feature plugin sources above are MIT. Reference ocode HEAD: `fd7c24241338ad08e8e66b4c01e7014a10a8f8d6`; source checkout https://github.com/ragokan/ocode. Warp fork provenance: https://github.com/ragokan/opencode-warp, upstream https://github.com/warpdotdev/opencode-warp, original source HEAD `65a41f544af0934641b61a6642083402c3774cc1` plus preserved local modifications (see ocode's `SOURCES.md`).
 
 Observed environment: Bun 1.4.2, OpenTUI 0.5.17, Solid 1.9.12, Paseo client/protocol 0.11.2. Plugin runtime access remains through `ctx`, and `@pasode/host` imports are erased types only.

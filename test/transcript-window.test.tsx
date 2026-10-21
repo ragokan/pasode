@@ -3,7 +3,7 @@ import { testRender } from "@opentui/solid"
 import { afterEach, expect, mock, spyOn, test } from "bun:test"
 import { App } from "../src/app"
 import { runCommand } from "../src/commands"
-import { api, setAgents, setTimeline, type PaseoAgent } from "../src/paseo"
+import { api, openTimeline, setAgents, setTimeline, type PaseoAgent } from "../src/paseo"
 import { prefs, setAgentId, setPref } from "../src/state"
 import type { AgentTimelineItem } from "../src/timeline"
 
@@ -101,9 +101,10 @@ test("a text selection keeps revealed rows mounted at the bottom", async () => {
   expect(mounted()).toHaveLength(40)
 }, 30000)
 
-test("pageup at the top fetches the daemon's older page and mounts 60 of it without moving the screen", async () => {
+test("repeated pageup during an older-page request reveals once without moving the screen", async () => {
   const older = transcript("o", 100).map((item, i) => ({ item, timestamp: new Date(1000 + i).toISOString() }))
-  const refetch = mock(async () => ({ entries: older, hasOlder: false, startCursor: null }))
+  let resolve!: (page: { entries: typeof older; hasOlder: boolean; startCursor: null }) => void
+  const refetch = mock(() => new Promise((done) => { resolve = done }))
   const ref = spyOn(api.agents, "ref").mockImplementation(() => ({ commands: async () => ({ commands: [] }), timeline: { refetch } }) as never)
   try {
     const { screen, settle, scroll, mounted, row } = await openApp(transcript("n", 30), { hasOlder: true, startCursor: { epoch: "e", seq: 1 } })
@@ -112,6 +113,10 @@ test("pageup at the top fetches the daemon's older page and mounts 60 of it with
     await settle()
     const y = row(0).y
     runCommand("messages.page_up")
+    runCommand("messages.page_up")
+    runCommand("messages.page_up")
+    expect(refetch).toHaveBeenCalledTimes(1)
+    resolve({ entries: older, hasOlder: false, startCursor: null })
     await settle(300)
     expect(refetch).toHaveBeenCalledTimes(1)
     // The 30 rows now sit at 100…129, the 40-row tail starts at 90, and 60 more of the older page mount above it.
@@ -120,6 +125,44 @@ test("pageup at the top fetches the daemon's older page and mounts 60 of it with
     expect(row(100).y).toBe(y)
     expect(screen.captureCharFrame()).toContain("question n0")
   } finally {
+    ref.mockRestore()
+  }
+}, 30000)
+
+test("an old session's pending page does not block PageUp in the next session", async () => {
+  const pending: ((page: unknown) => void)[] = []
+  const refetch = mock(() => new Promise((resolve) => pending.push(resolve)))
+  const ref = spyOn(api.agents, "ref").mockImplementation(() => ({ commands: async () => ({ commands: [] }), timeline: { refetch } }) as never)
+  try {
+    const { screen, settle, scroll, mounted } = await openApp(transcript("a", 30), { hasOlder: true, startCursor: { epoch: "a", seq: 1 } })
+    scroll.scrollTo(0)
+    await settle()
+    runCommand("messages.page_up")
+    expect(refetch).toHaveBeenCalledTimes(1)
+
+    await openTimeline(undefined)
+    setAgents("next", { id: "next", provider: "claude", cwd: "/tmp", status: "idle", updatedAt: new Date().toISOString() } as PaseoAgent)
+    setAgentId("next")
+    const rows = transcript("b", 30)
+    setTimeline({ agentId: "next", rows, times: rows.map(() => 1000), marks: [], hasOlder: true, startCursor: { epoch: "b", seq: 1 } })
+    await settle()
+    scroll.scrollTo(0)
+    await settle()
+    runCommand("messages.page_up")
+    expect(refetch).toHaveBeenCalledTimes(2)
+
+    // The old request settling must not clear the newer request's guard.
+    pending[0]!({ entries: [], hasOlder: false, startCursor: null })
+    await settle()
+    runCommand("messages.page_up")
+    expect(refetch).toHaveBeenCalledTimes(2)
+    pending[1]!({ entries: transcript("old", 100).map((item) => ({ item, timestamp: new Date(1000).toISOString() })), hasOlder: false, startCursor: null })
+    await settle(300)
+    expect(mounted()).toHaveLength(100)
+    expect(screen.captureCharFrame()).toContain("question b0")
+  } finally {
+    await openTimeline(undefined)
+    for (const resolve of pending) resolve({ entries: [], hasOlder: false, startCursor: null })
     ref.mockRestore()
   }
 }, 30000)

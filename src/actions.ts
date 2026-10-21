@@ -30,7 +30,7 @@ export function agentOf(agent: { provider: string; currentModeId?: string | null
 export async function cycleAgent(agent: PaseoAgent) {
   const next = agentOf(agent) === "plan" ? "build" : "plan"
   if (agent.provider === "codex") return daemon.setAgentFeature(agent.id, "plan_mode", next === "plan")
-  return daemon.setAgentMode(agent.id, next === "plan" ? "plan" : (agentConfig(agent.provider, "build").modeId ?? BYPASS_MODE.claude!))
+  return daemon.setAgentMode(agent.id, next === "plan" ? "plan" : (agentConfig(agent.provider, "build").modeId ?? "default"))
 }
 
 /** New session from the draft (provider/model/effort/agent; fork context or worktree if set). */
@@ -112,7 +112,10 @@ export async function exportTranscript() {
   })
   if (!file) return
   try {
-    while (timeline.hasOlder && (await loadOlder()));
+    while (timeline.agentId === agent.id && timeline.hasOlder && (await loadOlder()));
+    if (timeline.agentId !== agent.id || current()?.id !== agent.id || timeline.hasOlder || timeline.loading) {
+      throw new Error("Session history changed during export; try again")
+    }
     const target = path.resolve(agent.cwd, file)
     await writeFile(target, transcriptMarkdown({ ...agent, title: sessionTitle(agent) }, timeline.rows))
     notify(`Exported to ${target}`, "success")
