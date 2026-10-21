@@ -45,8 +45,6 @@ export function App(props: { initialAgentId?: string }) {
   const [pending, setPending] = createSignal(false)
   const [escHint, setEscHint] = createSignal(false)
 
-  // Theme from kv/config; the built-in palette stays if it can't load.
-  loadTheme(prefs.theme, prefs.themeMode).then(applyTheme, () => {})
   void loadPlugins(renderer, sidebarFeatures)
   createEffect(() => (renderer.useMouse = prefs.mouse))
 
@@ -864,6 +862,7 @@ export function App(props: { initialAgentId?: string }) {
               </Show>
               <Transcript
                 rows={timeline.rows}
+                revision={timeline.revision}
                 times={timeline.times}
                 marks={timeline.marks}
                 running={running()}

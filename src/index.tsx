@@ -1,11 +1,5 @@
-import { render } from "@opentui/solid"
-import { App } from "./app"
 import { startLocalDaemon } from "./local-daemon"
-import { sessionEpilogue } from "./logo"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
-import { rendererOptions } from "./renderer"
-import { agentId, prefs } from "./state"
-import { checkForUpdate, installed, relaunch } from "./update"
 
 const usage = `paseo-tui [-s] [agent-id]
 
@@ -21,22 +15,41 @@ if (arg === "-h" || arg === "--help") {
   process.exit(0)
 }
 
+// Connect while the app's modules load (they take longer than the handshake), and apply the theme before the first frame.
+// Loading starts one loop turn after connect() does: it is ~0.7 s of synchronous work, and the socket must open first.
+const daemonReady = startLocalDaemon()
+const connected = daemonReady.then(connect)
+const loaded = daemonReady.then(() => Bun.sleep(0)).then(() =>
+  Promise.all([
+    import("@opentui/solid"),
+    import("./app"),
+    import("./logo"),
+    import("./renderer"),
+    import("./state"),
+    import("./update"),
+    Promise.all([import("./state"), import("./theme"), import("./themes")]).then(([{ prefs }, { applyTheme }, { loadTheme }]) =>
+      loadTheme(prefs.theme, prefs.themeMode).then(applyTheme, () => {}),
+    ),
+  ]),
+)
+loaded.catch(() => {}) // a failed start is reported through `connected`; an import error still throws at the await below
 try {
-  await startLocalDaemon()
-  await connect()
+  await connected
 } catch (error) {
   console.error(`Could not reach the Paseo daemon: ${error instanceof Error ? error.message : error}`)
   console.error("Is it running? Check with `paseo status`.")
   process.exit(1)
 }
+// `update.installed` is a live binding the /update command flips; keep the namespaces.
+const [{ render }, { App }, { sessionEpilogue }, { rendererOptions }, state, update] = await loaded
 
 await render(() => <App initialAgentId={arg} />, {
   ...rendererOptions,
-  useMouse: prefs.mouse,
+  useMouse: state.prefs.mouse,
   onDestroy: () => {
-    const id = agentId()
-    if (id && !installed) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")
-    void disconnect().finally(() => (installed ? relaunch(id) : process.exit(0)))
+    const id = state.agentId()
+    if (id && !update.installed) process.stdout.write(sessionEpilogue({ title: (agents[id] && sessionTitle(agents[id])) || "Untitled", id }) + "\n")
+    void disconnect().finally(() => (update.installed ? update.relaunch(id) : process.exit(0)))
   },
 })
-void checkForUpdate()
+void update.checkForUpdate()

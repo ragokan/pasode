@@ -1,5 +1,5 @@
 import { RGBA } from "@opentui/core"
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Index, onCleanup, Show } from "solid-js"
 import { prefs } from "../state"
 import { theme } from "../theme"
 
@@ -22,17 +22,28 @@ export function blocksFrame(frame: number, color: RGBA) {
   })
 }
 
-export function PromptSpinner(props: { color: RGBA }) {
-  const [frame, setFrame] = createSignal(0)
+const [tick, setTick] = createSignal(0)
+let spinners = 0
+let timer: ReturnType<typeof setInterval> | undefined
+
+/** One 80 ms clock for every spinner (OpenCode ticks at 25 fps; this is every other frame). It runs only while a spinner is mounted with animations on. */
+export function spinnerTick() {
   createEffect(() => {
     if (!prefs.animations) return
-    // Half OpenCode's 25 fps: every other frame, same cycle time, half the redraws.
-    const timer = setInterval(() => setFrame((frame) => (frame + 2) % 54), 80)
-    onCleanup(() => clearInterval(timer))
+    if (!spinners++) timer = setInterval(() => setTick((value) => value + 1), 80)
+    onCleanup(() => {
+      if (!--spinners) clearInterval(timer)
+    })
   })
-  const blocks = createMemo(() => blocksFrame(frame(), props.color))
+  return tick
+}
+
+export function PromptSpinner(props: { color: RGBA }) {
+  const tick = spinnerTick()
+  const blocks = createMemo(() => blocksFrame(tick() * 2, props.color))
   // OpenCode's still prompt indicator with animations off.
   return <Show when={prefs.animations} fallback={<text fg={theme.textMuted}>[⋯]</text>}>
-    <text wrapMode="none"><For each={blocks()}>{(block) => <span style={{ fg: block.color }}>{block.text}</span>}</For></text>
+    {/* Index keeps the spans and updates their text and color; For rebuilt all eight every frame. */}
+    <text wrapMode="none"><Index each={blocks()}>{(block) => <span style={{ fg: block().color }}>{block().text}</span>}</Index></text>
   </Show>
 }

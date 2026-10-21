@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs"
 import { mkdir, readFile, realpath, rename, rmdir, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { mcpRevision } from "./paseo"
 
 export type McpServer = { name: string; scope: "user" | "local" | "project" | "global"; enabled: boolean }
 
@@ -36,12 +37,27 @@ export async function listMcpServers(provider: string, cwd: string): Promise<Mcp
 
 export type McpHealth = "connected" | "failed" | "needs_auth"
 
+const HEALTH_TTL = 60_000
+const healthCache = new Map<string, { revision: number; at: number; result: Promise<Record<string, McpHealth>> }>()
+
 /**
  * Live status as the current model's CLI sees it: `claude mcp list` health-checks every server with the env
  * Paseo launches Claude with. Codex has no health check, so its enabled servers stay "configured".
+ * That spawn is slow, so a result (or the request still running) is reused per provider and directory for a minute,
+ * or until an MCP toggle bumps `mcpRevision`.
  */
-export async function mcpHealth(provider: string, cwd: string): Promise<Record<string, McpHealth>> {
-  if (provider !== "claude") return {}
+export function mcpHealth(provider: string, cwd: string): Promise<Record<string, McpHealth>> {
+  if (provider !== "claude") return Promise.resolve({})
+  const key = `${provider}\0${cwd}`
+  const revision = mcpRevision()
+  const cached = healthCache.get(key)
+  if (cached && cached.revision === revision && Date.now() - cached.at < HEALTH_TTL) return cached.result
+  const result = claudeMcpHealth(cwd)
+  healthCache.set(key, { revision, at: Date.now(), result })
+  return result
+}
+
+async function claudeMcpHealth(cwd: string): Promise<Record<string, McpHealth>> {
   try {
     const child = Bun.spawn(["claude", "mcp", "list"], { cwd, env: { ...process.env, ...providerEnv("claude") }, stdin: "ignore", stdout: "pipe", stderr: "ignore" })
     const timer = setTimeout(() => child.kill(), 30_000)

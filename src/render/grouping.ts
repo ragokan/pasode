@@ -23,7 +23,7 @@ const explorationTools = new Set(["read", "glob", "grep", "webfetch", "websearch
 
 // Ported from OpenCode 2.0.26 grouping/session.ts partPath (MIT); see OPENCODE-LICENSE.
 export function partPath(item: AgentTimelineItem, verbosity: Verbosity): GroupKind[] {
-  if (toolName(item) === "question") return []
+  if (toolName(item) === "question" || (item.type === "tool_call" && item.agentMessage)) return []
   const part = item.type === "reasoning" || item.type === "tool_call" || item.type === "todo"
   const activity: GroupKind[] = verbosity === "low" && part ? ["activity"] : []
   if (item.type === "reasoning") return [...activity, "reasoning"]

@@ -355,3 +355,22 @@ test("a page prepended while pinned doesn't mount above the pinned rows, not eve
   expect(add.mock.calls.length + insert.mock.calls.length).toBe(40)
   expect(ids()[0]).toBe("row-310")
 })
+
+test("an agent's message is a message from its sender, not a tool call, even at low verbosity", async () => {
+  const message = (sender: { id: string; title?: string }, event: "message" | "finished", text: string): AgentTimelineItem =>
+    ({ type: "tool_call", callId: sender.id, name: "agent_message", status: "completed", error: null, detail: { type: "unknown", input: null, output: null }, agentMessage: { event, sender, text } })
+  const rows: AgentTimelineItem[] = [
+    { type: "user_message", text: "Ask the reviewer" },
+    message({ id: "3f2a9c1e-0b7d-4e55-9a31-5d0c7e8b1a42", title: "Reviewer" }, "message", "Looks good to me"),
+    message({ id: "9b1d7c20-1111-4222-8333-444455556666" }, "finished", "Done."),
+  ]
+  screen = await testRender(() => <Transcript {...defaults} rows={rows} times={[1000, 1100, 1200]} verbosity="low" />, { width: 80, height: 20 })
+  await flush()
+  const frame = screen.captureCharFrame()
+  expect(frame).toContain("from Reviewer")
+  expect(frame).toContain("Looks good to me")
+  expect(frame).toContain("from 9b1d7c20 · finished")
+  expect(frame).toContain("Done.")
+  expect(frame).not.toMatch(/\d tools?/)
+  expect(screen.renderer.root.getChildren().map((node) => node.id)).toEqual(["row-0", "row-1", "row-2"])
+})

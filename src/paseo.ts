@@ -3,7 +3,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client"
 import { readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { createSignal } from "solid-js"
+import { batch, createComputed, createMemo, createRoot, createSignal } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { applyTimelineItem, dropStaleCompactions, type AgentTimelineItem } from "./timeline"
 
@@ -84,13 +84,40 @@ export const spawnedBy = (agent: PaseoAgent | undefined, ancestorId: string): bo
 }
 
 export const active = (agent: PaseoAgent) => agent.status === "running" || !!agent.pendingPermissions?.length
+
+// Module-level memos: one pass over the agents per change, instead of a scan per agent per read (O(n²) for the session list).
+const workspaceAgents = createRoot(() =>
+  createMemo(() => {
+    const result = new Map<string, PaseoAgent[]>()
+    for (const agent of Object.values(agents)) {
+      if (!agent.workspaceId) continue
+      const peers = result.get(agent.workspaceId)
+      if (peers) peers.push(agent)
+      else result.set(agent.workspaceId, [agent])
+    }
+    return result
+  }),
+)
+// Every agent with an active subagent below it, directly or through other subagents. A store, so a reader of one
+// agent's flag isn't woken when another's changes.
+const [ancestorsOfActive, setAncestorsOfActive] = createStore<Record<string, true>>({})
+createRoot(() =>
+  createComputed(() => {
+    const result: Record<string, true> = {}
+    for (const agent of Object.values(agents)) {
+      if (!active(agent)) continue
+      for (let parent = agent.labels?.["paseo.parent-agent-id"]; parent && !result[parent]; parent = agents[parent]?.labels?.["paseo.parent-agent-id"]) result[parent] = true
+    }
+    setAncestorsOfActive(reconcile(result))
+  }),
+)
+
 /** Idle, but a subagent it spawned is still working, so the session isn't done. */
-export const waiting = (agent: PaseoAgent) => !active(agent) && Object.values(agents).some((other) => active(other) && spawnedBy(other, agent.id))
+export const waiting = (agent: PaseoAgent) => !active(agent) && !!ancestorsOfActive[agent.id]
 
 /** The agent's own workspace, if no other live agent shares it; subagents it spawned there don't count. */
 export const ownWorkspace = (agent: PaseoAgent) =>
-  agent.workspaceId &&
-  Object.values(agents).every((other) => other.id === agent.id || other.workspaceId !== agent.workspaceId || spawnedBy(other, agent.id))
+  agent.workspaceId && !workspaceAgents().get(agent.workspaceId)?.some((other) => other.id !== agent.id && !spawnedBy(other, agent.id))
     ? agent.workspaceId
     : undefined
 
@@ -115,17 +142,21 @@ export type Mark =
 export const [timeline, setTimeline] = createStore<{
   agentId?: string
   rows: AgentTimelineItem[]
+  /** Bumped by every change to `rows` except a text delta merged into the last message, so readers of the whole timeline subscribe to this instead of to every row. */
+  revision: number
   times: number[]
   marks: Mark[]
   loading: boolean
   hasOlder: boolean
   startCursor?: Cursor
-}>({ rows: [], times: [], marks: [], loading: false, hasOlder: false })
+}>({ rows: [], revision: 0, times: [], marks: [], loading: false, hasOlder: false })
 
 const PAGE = 300
 
 /** Bumped on every open, so a reply for an earlier open (even of the same session) is dropped. */
 let opened = 0
+/** Bumped when a refetch rewrites the rows in place (same array), so an older page fetched before it is dropped. */
+let refetched = 0
 let older: Promise<boolean> | undefined
 
 /** Prepends the previous page of history (the newest PAGE entries load on open). Concurrent calls share one request. */
@@ -138,10 +169,11 @@ export function loadOlder() {
 
 async function fetchOlder() {
   const open = opened
+  const replaced = refetched
   const { agentId, startCursor, hasOlder, rows } = timeline
   if (!agentId || !startCursor || !hasOlder) return false
   const page = await api.agents.ref(agentId).timeline.refetch({ direction: "before", cursor: startCursor, limit: PAGE, projection: "projected" })
-  if (open !== opened || timeline.rows !== rows) return false
+  if (open !== opened || timeline.rows !== rows || refetched !== replaced) return false
   setTimeline(
     produce((draft) => {
       const entries = dropStaleCompactions(page.entries)
@@ -150,6 +182,7 @@ async function fetchOlder() {
       draft.marks.unshift(...entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))))
       draft.hasOlder = page.hasOlder && !!page.startCursor
       draft.startCursor = page.startCursor ?? undefined
+      draft.revision++
     }),
   )
   return page.entries.length > 0
@@ -240,6 +273,7 @@ export async function openTimeline(agentId: string | undefined) {
         // A delta merged into the last message adds nothing the mark readers use (first output, user and tool marks);
         // one mark per delta made every footer/metrics rescan grow with the stream.
         else if (event.item.type === "assistant_message" || event.item.type === "reasoning") return
+        draft.revision++
         draft.marks.push(itemMark(event.item, at))
       }),
     )
@@ -257,13 +291,18 @@ export async function openTimeline(agentId: string | undefined) {
       if (open !== opened || current !== loads) return
       lastSeq = page.endCursor?.seq ?? 0
       const entries = dropStaleCompactions(page.entries)
-      setTimeline({
-        rows: entries.map((entry) => entry.item),
-        times: entries.map((entry) => Date.parse(entry.timestamp)),
-        marks: entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))),
-        // After a rewind the daemon reports hasOlder with no cursor to page from.
-        hasOlder: page.hasOlder && !!page.startCursor,
-        startCursor: page.startCursor ?? undefined,
+      refetched++
+      // Merged in place by position, so rows a reconnect refetch left unchanged keep their store nodes (and mounted views).
+      batch(() => {
+        setTimeline("rows", reconcile(entries.map((entry) => entry.item), { merge: true }))
+        setTimeline("times", reconcile(entries.map((entry) => Date.parse(entry.timestamp)), { merge: true }))
+        setTimeline("marks", reconcile(entries.map((entry) => itemMark(entry.item, Date.parse(entry.timestamp))), { merge: true }))
+        setTimeline({
+          // After a rewind the daemon reports hasOlder with no cursor to page from.
+          hasOlder: page.hasOlder && !!page.startCursor,
+          startCursor: page.startCursor ?? undefined,
+          revision: timeline.revision + 1,
+        })
       })
       stale = false
     } finally {

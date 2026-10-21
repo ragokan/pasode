@@ -1,5 +1,6 @@
 // Provenance: OpenCode MIT packages/tui/src/feature-plugins/sidebar/todo.tsx.
 import { createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { unwrap } from "solid-js/store"
 import type { PasodePlugin } from "../../plugin"
 
 export default {
@@ -7,8 +8,14 @@ export default {
   setup(ctx) {
     onCleanup(ctx.ui.slot("sidebar_content", (props) => {
       const [open, setOpen] = createSignal(true)
-      const list = createMemo(() => ctx.paseo.timeline.agentId === props.agent?.id
-        ? ctx.paseo.timeline.rows.findLast((row) => row.type === "todo")?.items ?? [] : [])
+      const list = createMemo(() => {
+        const { timeline } = ctx.paseo
+        if (timeline.agentId !== props.agent?.id) return []
+        // Find the row on the raw rows (per revision), then read just that row through the store so its edits still propagate.
+        const row = (timeline.revision, unwrap(timeline.rows).findLastIndex((row) => row.type === "todo"))
+        const todo = timeline.rows[row]
+        return todo?.type === "todo" ? todo.items : []
+      })
       return <Show when={list().some((item) => !item.completed && item.status !== "completed")}>
         <box>
           <box flexDirection="row" gap={1} onMouseDown={() => list().length > 2 && setOpen((value) => !value)}>
