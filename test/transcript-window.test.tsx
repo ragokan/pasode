@@ -46,7 +46,7 @@ test("tail-first transcript: wheel reveal holds the viewport, bottom follows the
   expect(mounted()).toHaveLength(40)
   expect(mounted()[0]).toBe(260)
 
-  // Near the top, each wheel step up moves a fixed row by one line, including the step that mounts the next chunk.
+  // Near the top, each wheel step up moves a fixed row by OpenCode's three lines, including the step that mounts the next chunk.
   scroll.scrollTo(scroll.viewport.height + 6)
   await settle()
   const steps: number[] = []
@@ -57,7 +57,7 @@ test("tail-first transcript: wheel reveal holds the viewport, bottom follows the
     steps.push(row(280).y - y)
   }
   expect(mounted()).toHaveLength(100)
-  expect(steps.at(-1)).toBe(steps.at(-2)!)
+  expect(steps).toEqual(steps.map(() => 3))
 
   scroll.scrollTo(scroll.scrollHeight)
   await settle()
@@ -81,6 +81,19 @@ test("tail-first transcript: wheel reveal holds the viewport, bottom follows the
   await settle(300)
   expect(mounted()[0]).toBeLessThan(260)
   expect(screen.captureCharFrame().match(/q(\d+)/)?.[1]).toBe(String(mounted()[0]))
+}, 30000)
+
+test("a fast wheel burst near the top mounts one chunk per layout, not the whole transcript", async () => {
+  const { screen, settle, scroll, mounted } = await openApp(transcript("q", 300))
+  scroll.scrollTo(scroll.viewport.height)
+  await settle()
+  const top = mounted()[0]!
+  // A trackpad swipe: wheel events faster than the two frames a reveal waits for.
+  for (let i = 0; i < 10; i++) await screen.mockMouse.scroll(10, 10, "up")
+  await settle(300)
+  expect(mounted()).toHaveLength(100)
+  expect(mounted()[0]).toBe(top - 60)
+  expect(scroll.scrollTop).toBeGreaterThan(0)
 }, 30000)
 
 test("a text selection keeps revealed rows mounted at the bottom", async () => {

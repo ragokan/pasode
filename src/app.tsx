@@ -1,5 +1,5 @@
 import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types"
-import { TextAttributes, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes, type KeyEvent, type ScrollAcceleration, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import os from "node:os"
 import path from "node:path"
@@ -30,6 +30,8 @@ import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
 
 const home = os.homedir()
 const tilde = (value: string) => value.replace(home, "~")
+// OpenCode's default scroll speed: three lines per wheel tick (OpenTUI's own default is one).
+const scrollSpeed: ScrollAcceleration = { tick: () => 3, reset: () => {} }
 
 export function App(props: { initialAgentId?: string }) {
   const renderer = useRenderer()
@@ -338,6 +340,8 @@ export function App(props: { initialAgentId?: string }) {
   }
   /** Mounts the next older transcript chunk, keeping what's on screen in place. */
   function revealOlder() {
+    // Like OpenCode, one chunk per layout: a fast wheel burst would otherwise mount the whole transcript at once.
+    if (revealing) return true
     const before = scroll?.scrollHeight ?? 0
     if (!transcript?.reveal()) return false
     revealing = true
@@ -840,6 +844,7 @@ export function App(props: { initialAgentId?: string }) {
               }}
               onMouseScroll={(event) => event.scroll?.direction === "up" && scroll!.scrollTop <= scroll!.viewport.height && revealOlder()}
               flexGrow={1}
+              scrollAcceleration={scrollSpeed}
               stickyScroll
               stickyStart="bottom"
               viewportOptions={{ paddingRight: prefs.scrollbar ? 1 : 0 }}

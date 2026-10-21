@@ -13,4 +13,8 @@ export const rendererOptions = {
   exitOnCtrlC: false,
   // Like OpenCode: clicks must not move focus off the prompt (the transcript scrollbox is focusable).
   autoFocus: false,
+  // 60 fps, like OpenCode. maxFps caps on-demand frames (scrolling, typing); targetFps paces the live loop (layout waits,
+  // drag-scroll), which OpenTUI otherwise runs at 30.
+  targetFps: 60,
+  maxFps: 60,
 } satisfies CliRendererConfig
