@@ -18,8 +18,8 @@ export type Draft = {
   thinking?: string
   /** Transient: OpenCode's agent for the next session — "plan" starts in plan mode; Build (default) bypasses permissions. */
   agent?: "plan"
-  /** Transient (not remembered): start in a new git worktree, optionally on this branch. */
-  worktree?: { branch?: string }
+  /** Transient (not remembered): start in a new git worktree, optionally on this branch, cut from this base ref. */
+  worktree?: { branch?: string; base?: string }
   /** Transient: directory for the next session ("New session location: active session"); launch directory otherwise. */
   cwd?: string
   /** Transient: a fork's chat-history attachment, source title and directory. */

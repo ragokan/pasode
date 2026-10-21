@@ -12,6 +12,7 @@ import { Composer, composerOpen, handleComposerKey, runningSubagents, terminals,
 import { configPath } from "./config"
 import { dialog, DialogHost, dialogs, DialogSelect, type SelectOption } from "./dialog"
 import { footerLayout, liveLabel, usageItems } from "./footer"
+import { ChangesView, registerGit } from "./git"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
@@ -123,6 +124,7 @@ export function App(props: { initialAgentId?: string }) {
     { id: "app.exit", title: "Exit", category: "System", keybind: "<leader>q", slash: "exit", run: exit },
   ]
   registerCommands(builtins)
+  registerGit()
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -935,6 +937,7 @@ export function App(props: { initialAgentId?: string }) {
           </box>
         )}
       </Show>
+      <ChangesView />
       <DialogHost />
     </box>
   )
