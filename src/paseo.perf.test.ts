@@ -57,23 +57,58 @@ test("a refetch keeps the rows it didn't change (same store nodes), updates the 
   const { calls, send } = fakeTimeline()
   const opening = openTimeline("a")
   await tick()
-  calls[0]!.resolve(page([{ type: "user_message", text: "Go" }, tool("running")]))
+  calls[0]!.resolve(page([{ type: "user_message", text: "Go", messageId: "u1" }, tool("running")]))
   await opening
   const [user, call] = unwrap(timeline.rows)
   const before = timeline.revision
-  const rows = timeline.rows
 
   send({ event: { type: "replacement" } })
-  calls[1]!.resolve(page([{ type: "user_message", text: "Go" }, tool("completed"), { type: "assistant_message", text: "Done" }]))
+  calls[1]!.resolve(page([{ type: "user_message", text: "Go", messageId: "u1" }, tool("completed"), { type: "assistant_message", text: "Done" }]))
   await tick()
 
-  expect(timeline.rows).toBe(rows)
   expect(unwrap(timeline.rows)[0]).toBe(user)
   expect(unwrap(timeline.rows)[1]).toBe(call)
   expect(timeline.rows.map((row) => row.type === "tool_call" ? row.status : row.type)).toEqual(["user_message", "completed", "assistant_message"])
   expect(timeline.times).toHaveLength(3)
   expect(timeline.marks).toHaveLength(3)
   expect(timeline.revision).toBeGreaterThan(before)
+})
+
+const message = (type: "user_message" | "assistant_message", messageId: string) => ({ type, text: messageId, messageId })
+
+// A row someone still holds (a revert confirmation, a dialog) must keep meaning the same message after a refetch.
+test("a refetch whose window shifted replaces rows instead of rewriting them: A,B becomes B,C", async () => {
+  const { calls, send } = fakeTimeline()
+  const opening = openTimeline("a")
+  await tick()
+  calls[0]!.resolve(page([message("user_message", "A"), message("assistant_message", "reply A"), message("user_message", "B"), message("assistant_message", "reply B")]))
+  await opening
+  const [heldA, , heldB] = [timeline.rows[0]!, timeline.rows[1]!, timeline.rows[2]!]
+
+  send({ event: { type: "subscription_restored" } })
+  calls[1]!.resolve(page([message("user_message", "B"), message("assistant_message", "reply B"), message("user_message", "C"), message("assistant_message", "reply C")]))
+  await tick()
+
+  expect(heldA).toMatchObject({ messageId: "A", text: "A" })
+  expect(heldB).toMatchObject({ messageId: "B", text: "B" })
+  expect(timeline.rows[0]).toBe(heldB) // the same message keeps its store node, at its new position
+  expect(timeline.rows.map((row) => (row as { messageId: string }).messageId)).toEqual(["B", "reply B", "C", "reply C"])
+})
+
+test("rows without an id are replaced by a refetch, never rewritten in place", async () => {
+  const { calls, send } = fakeTimeline()
+  const opening = openTimeline("a")
+  await tick()
+  calls[0]!.resolve(page([{ type: "reasoning", text: "first thought" }]))
+  await opening
+  const held = timeline.rows[0]!
+
+  send({ event: { type: "replacement" } })
+  calls[1]!.resolve(page([{ type: "reasoning", text: "second thought" }]))
+  await tick()
+
+  expect(held).toMatchObject({ text: "first thought" })
+  expect(timeline.rows[0]).toMatchObject({ text: "second thought" })
 })
 
 test("a session's waiting flag recomputes for the agents it concerns, not for every agent on every update", () => {
