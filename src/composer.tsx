@@ -5,13 +5,13 @@ import { useKeyboard } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { dialog } from "./dialog"
-import { agents, daemon, openSubagentTimeline } from "./paseo"
+import { agents, daemon, findModel, openSubagentTimeline } from "./paseo"
 import { current } from "./state"
 import { SplitBorder } from "./session"
 import { agentId, navigate, setSubagent, showError } from "./state"
 import { theme } from "./theme"
 
-export type SubagentEntry = { key: string; kind: "agent" | "native"; id: string; agent: string; title: string; status: string }
+export type SubagentEntry = { key: string; kind: "agent" | "native"; id: string; agent: string; title: string; status: string; model?: string }
 
 const [native, setNative] = createStore<{ parentId?: string; list: Awaited<ReturnType<typeof daemon.listProviderSubagents>>["subagents"] }>({ list: [] })
 
@@ -28,7 +28,19 @@ export const subagents = createMemo<SubagentEntry[]>(() => {
   if (!parent) return []
   const children = Object.values(agents)
     .filter((agent) => agent.labels?.["paseo.parent-agent-id"] === parent)
-    .map((agent): SubagentEntry => ({ key: `agent:${agent.id}`, kind: "agent", id: agent.id, agent: "Agent", title: agent.title || "Untitled", status: agent.status }))
+    .map((agent): SubagentEntry => {
+      const model = agent.model ?? agent.runtimeInfo?.model
+      return {
+        key: `agent:${agent.id}`,
+        kind: "agent",
+        id: agent.id,
+        agent: "Agent",
+        title: agent.title || "Untitled",
+        status: agent.status,
+        // Provider-native subagents carry no model in Paseo, so only child agents get "Sonnet 5.5 · xhigh".
+        model: [findModel(agent.provider, model)?.label ?? model, agent.thinkingOptionId ?? agent.effectiveThinkingOptionId].filter(Boolean).join(" · "),
+      }
+    })
   const provided = native.parentId === parent ? native.list : []
   return [
     ...children,
@@ -148,7 +160,7 @@ export function Composer() {
   let scroll: ScrollBoxRenderable | undefined
   const items = createMemo(() =>
     tab() === "subagents"
-      ? visibleSubagents().map((entry) => ({ key: entry.key, text: `${entry.agent}: ${entry.title}`, meta: entry.status === "running" ? "Running" : "" }))
+      ? visibleSubagents().map((entry) => ({ key: entry.key, text: `${entry.agent}: ${entry.title}`, meta: [entry.model, entry.status === "running" && "Running"].filter(Boolean).join(" · ") }))
       : visibleShells().map((shell) => ({ key: shell.id, text: shell.title || shell.name, meta: shell.activity?.state ?? "" })),
   )
   createEffect(() => {

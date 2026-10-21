@@ -2,7 +2,7 @@ import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, test } from "bun:test"
 import { Composer, composerOpen, handleComposerKey, runningSubagents, toggleComposer } from "../src/composer"
-import { setAgents, type PaseoAgent } from "../src/paseo"
+import { setAgents, setCatalog, type PaseoAgent } from "../src/paseo"
 import { setAgentId } from "../src/state"
 
 let screen: TestRendererSetup | undefined
@@ -19,8 +19,9 @@ test("↓ composer lists running child sessions, switches tabs, toggles finished
   setAgents({
     parent: agent("parent", "idle"),
     a: agent("a", "running", { "paseo.parent-agent-id": "parent" }),
-    b: agent("b", "idle", { "paseo.parent-agent-id": "parent" }),
+    b: { ...agent("b", "idle", { "paseo.parent-agent-id": "parent" }), model: "claude-sonnet-5-5", thinkingOptionId: "high" },
   })
+  setCatalog("claude", [{ id: "claude-sonnet-5-5", label: "Sonnet 5.5" }] as never)
   setAgentId("parent")
   expect(runningSubagents()).toBe(1)
   screen = await testRender(() => <Composer />, { width: 80, height: 14 })
@@ -35,8 +36,9 @@ test("↓ composer lists running child sessions, switches tabs, toggles finished
   handleComposerKey(key("a", true))
   await screen.renderOnce()
   frame = screen.captureCharFrame()
-  expect(frame).toContain("Agent: Session b")
+  expect(frame).toMatch(/Agent: Session b\s+Sonnet 5\.5 · high\s/)
   expect(frame).not.toContain("Session a ")
+  setCatalog("claude", [])
 
   handleComposerKey(key("right"))
   await screen.renderOnce()
