@@ -62,18 +62,29 @@ export const [agents, setAgents] = createStore<Record<string, PaseoAgent>>({})
 
 /** Workspace id → title, live. */
 export const [workspaceTitles, setWorkspaceTitles] = createStore<Record<string, string | null>>({})
+/** Workspace id → when it was pinned (null: not pinned), live; synced with the Paseo app. */
+export const [workspacePins, setWorkspacePins] = createStore<Record<string, string | null>>({})
 
 async function watchWorkspaces() {
-  const titles = (entries: PaseoWorkspace[]) => reconcile(Object.fromEntries(entries.map((workspace) => [workspace.id, workspace.title ?? null])))
+  const by = (entries: PaseoWorkspace[], value: (workspace: PaseoWorkspace) => string | null | undefined) =>
+    reconcile(Object.fromEntries(entries.map((workspace) => [workspace.id, value(workspace) ?? null])))
+  const title = (workspace: PaseoWorkspace) => workspace.title
+  const pinned = (workspace: PaseoWorkspace) => workspace.pinnedAt
   const list = await api.workspaces.list({ filter: { includeBackground: true }, page: { limit: 200 }, subscribe: {} })
-  setWorkspaceTitles(titles(list.entries))
+  setWorkspaceTitles(by(list.entries, title))
+  setWorkspacePins(by(list.entries, pinned))
   list.subscription.subscribe({
-    snapshot: ({ entries }) => setWorkspaceTitles(titles(entries)),
+    snapshot: ({ entries }) => (setWorkspaceTitles(by(entries, title)), setWorkspacePins(by(entries, pinned))),
     update(message) {
       if (message.type !== "workspace_update") return
       const update = message.payload
-      if (update.kind === "upsert") setWorkspaceTitles(update.workspace.id, update.workspace.title ?? null)
-      else setWorkspaceTitles(produce((all) => delete all[update.id]))
+      if (update.kind === "upsert") {
+        setWorkspaceTitles(update.workspace.id, title(update.workspace) ?? null)
+        setWorkspacePins(update.workspace.id, pinned(update.workspace) ?? null)
+      } else {
+        setWorkspaceTitles(produce((all) => delete all[update.id]))
+        setWorkspacePins(produce((all) => delete all[update.id]))
+      }
     },
   })
 }

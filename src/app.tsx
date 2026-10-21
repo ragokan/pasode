@@ -2,7 +2,6 @@ import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types"
 import { TextAttributes, type KeyEvent, type ScrollAcceleration, type ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import os from "node:os"
-import path from "node:path"
 import { createEffect, createMemo, createResource, createSignal, Match, Show, Switch } from "solid-js"
 import pkg from "../package.json"
 import * as actions from "./actions"
@@ -10,15 +9,16 @@ import { attachmentsOf, rememberImages } from "./attachments"
 import { commandBindings, commands, isEnabled, keybindLabel, leader, registerCommands, runCommand, type Command } from "./commands"
 import { Composer, composerOpen, handleComposerKey, registerTerminalCommands, runningSubagents, runShell, terminals, toggleComposer, useSubagentFeed, useTerminalFeed } from "./composer"
 import { configPath } from "./config"
-import { dialog, DialogHost, dialogs, DialogSelect, type SelectOption } from "./dialog"
+import { dialog, DialogHost, dialogs, DialogSelect } from "./dialog"
 import { footerLayout, liveLabel, usageItems } from "./footer"
 import { ChangesView, registerGit } from "./git"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
 import { configSummary, registerManageCommands, statusDialog } from "./manage"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
-import { active, agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, waiting, type PaseoAgent } from "./paseo"
+import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline } from "./paseo"
 import { favoriteModels, modelSections, recentModels, rememberModel, selectModel, toggleFavorite } from "./models"
+import { TimelineDialog } from "./timeline-dialog"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { registerPromptCommands } from "./prompt/commands"
@@ -26,6 +26,8 @@ import { enqueue } from "./prompt/queue"
 import { suggestFiles } from "./prompt/files"
 import { renameArgument } from "./prompt/slash"
 import { quit } from "./renderer"
+import { sessionCommands } from "./session-commands"
+import { SessionList } from "./session-list"
 import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef } from "./session"
 import { DialogSettings } from "./settings"
 import { Sidebar, sidebarFeatures } from "./sidebar"
@@ -33,7 +35,6 @@ import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDra
 import { registerTabs, TabBar } from "./tabs"
 import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
-import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
 import { update } from "./update"
 import { copySelection, installUx } from "./ux"
 
@@ -135,6 +136,7 @@ export function App(props: { initialAgentId?: string }) {
   registerManageCommands()
   installUx(renderer, terminalFocused)
   registerGit()
+  registerCommands(sessionCommands({ scrollToRow }))
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -237,93 +239,8 @@ export function App(props: { initialAgentId?: string }) {
     dialog.replace(() => <SessionList />, "large")
   }
 
-  function SessionList() {
-    const [confirm, setConfirm] = createSignal<string>()
-    const options = createMemo(() =>
-      Object.values(agents)
-        .map((agent) => ({ agent, rank: active(agent) ? 2 : waiting(agent) ? 1 : 0 }))
-        .toSorted((a, b) => b.rank - a.rank || Date.parse(b.agent.updatedAt) - Date.parse(a.agent.updatedAt))
-        .map(
-          ({ agent, rank }): SelectOption<string> => ({
-            title: confirm() === agent.id ? "Press ctrl+d again to archive" : sessionTitle(agent) || "Untitled",
-            bg: confirm() === agent.id ? theme.error : undefined,
-            value: agent.id,
-            category: rank === 2 ? "Running" : rank === 1 ? "Waiting" : dayCategory(agent.updatedAt),
-            footer: `${agent.provider} · ${path.basename(agent.cwd)}`,
-            gutter:
-              agent.status === "running"
-                ? () => <Spinner color={theme.primary} />
-                : agent.pendingPermissions?.length
-                  ? () => <text fg={theme.warning}>△</text>
-                  : agent.status === "error"
-                    ? () => <text fg={theme.error}>✕</text>
-                    : rank === 1
-                      ? () => <Spinner />
-                      : undefined,
-          }),
-        ),
-    )
-    return (
-      <DialogSelect
-        title="Sessions"
-        emptyText="No sessions on the daemon yet"
-        options={options()}
-        current={agentId()}
-        onMove={() => setConfirm(undefined)}
-        onSelect={(option) => {
-          dialog.clear()
-          navigate(option.value)
-        }}
-        actions={[
-          {
-            label: "ctrl+r",
-            title: "rename",
-            match: (key) => key.ctrl && key.name === "r",
-            run: (option) => void actions.rename(option.value),
-          },
-          {
-            label: "ctrl+d",
-            title: "archive",
-            match: (key) => key.ctrl && key.name === "d",
-            run: (option) => {
-              if (confirm() !== option.value) return setConfirm(option.value)
-              setConfirm(undefined)
-              api.agents
-                .ref(option.value)
-                .archive()
-                .then(() => agentId() === option.value && navigate(undefined))
-                .catch(showError)
-            },
-          },
-        ]}
-      />
-    )
-  }
-
   function openTimelineDialog() {
-    const options = timeline.rows
-      .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.type === "user_message")
-      .map(({ row, index }) => ({
-        title: truncateLine(row.type === "user_message" ? collapseForkContext(row.text) : "", 70),
-        value: index,
-        footer: timeline.times[index] ? new Date(timeline.times[index]!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
-      }))
-      .reverse()
-    dialog.replace(
-      () => (
-        <DialogSelect
-          title="Jump to message"
-          emptyText="No messages yet"
-          options={options}
-          onSelect={(option) => {
-            dialog.clear()
-            scrollToRow(option.value)
-          }}
-        />
-      ),
-      "large",
-    )
+    dialog.replace(() => <TimelineDialog scrollToRow={scrollToRow} restore={(text) => prompt?.setText(text)} />, "large")
   }
 
   /** Set while revealed rows lay out: a bottom-stuck scroll would otherwise unpin them before we move. */

@@ -90,6 +90,8 @@ export function DialogSelect<T>(props: {
   actions?: SelectAction<T>[]
   /** false hides the search field (short lists such as /mcps). */
   search?: boolean
+  /** Typed text, for callers that filter the options themselves (e.g. a daemon search); they are then listed as given. */
+  onFilter?: (value: string) => void
 }) {
   const dimensions = useTerminalDimensions()
   const [filter, setFilter] = createSignal("")
@@ -98,7 +100,7 @@ export function DialogSelect<T>(props: {
 
   const filtered = createMemo(() => {
     const needle = filter().toLowerCase()
-    if (!needle) return props.options
+    if (!needle || props.onFilter) return props.options
     return props.options.filter((option) => fuzzy(needle, `${option.title} ${option.category ?? ""}`.toLowerCase()))
   })
   // A category header starts each run of options sharing one (category order is as given; filtering just hides misses).
@@ -166,7 +168,7 @@ export function DialogSelect<T>(props: {
           <box paddingTop={1}>
             <input
               focused
-              onInput={setFilter}
+              onInput={(value) => (setFilter(value), props.onFilter?.(value))}
               placeholder={props.placeholder ?? "Search"}
               placeholderColor={theme.textMuted}
               textColor={theme.textMuted}

@@ -10,7 +10,7 @@ test("a lone session shows its workspace's generated title, live; shared workspa
   setAgents({ a: agent("a", "w", "Lets update our packages to latest bun") })
   setWorkspaceTitles({ w: "Lets update our packages to latest bun" })
   const seen: (string | null | undefined)[] = []
-  createRoot(() => createEffect(() => seen.push(sessionTitle(agents.a!))))
+  const dispose = createRoot((dispose) => (createEffect(() => seen.push(sessionTitle(agents.a!))), dispose))
   // Paseo's auto-name after the first message only rewrites the workspace title.
   setWorkspaceTitles("w", "Upgrade Bun to 1.4.3")
   expect(seen).toEqual(["Lets update our packages to latest bun", "Upgrade Bun to 1.4.3"])
@@ -19,6 +19,8 @@ test("a lone session shows its workspace's generated title, live; shared workspa
   setWorkspaceTitles("w", "Shared workspace")
   setAgents("b", agent("b", "w", "Child task"))
   expect([sessionTitle(agents.a!), sessionTitle(agents.b!)]).toEqual(["Lets update our packages to latest bun", "Child task"])
+  // Left running, it would throw in the next test that clears the agents.
+  dispose()
 })
 
 test("subagents spawned into the parent's workspace don't take its title away", () => {

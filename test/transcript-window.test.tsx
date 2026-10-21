@@ -81,6 +81,8 @@ test("tail-first transcript: wheel reveal holds the viewport, bottom follows the
   await screen.mockInput.typeText("question q16")
   await settle()
   screen.mockInput.pressEnter()
+  await settle()
+  screen.mockInput.pressEnter() // Jump to message, the first of the message actions
   await settle(300)
   expect(mounted()[0]).toBeLessThan(260)
   expect(screen.captureCharFrame().match(/q(\d+)/)?.[1]).toBe(String(mounted()[0]))
