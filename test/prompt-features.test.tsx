@@ -1,6 +1,7 @@
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender, useKeyboard } from "@opentui/solid"
 import { afterEach, expect, test } from "bun:test"
+import { createSignal } from "solid-js"
 import { readFile, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -248,4 +249,30 @@ test("stash commands shelve the prompt, restore it onto a draft, and the list di
   } finally {
     setAgentId(undefined)
   }
+})
+
+test("a late answer for the old workspace can't replace the new workspace's @ results", async () => {
+  const [workspace, setWorkspace] = createSignal("mention-a")
+  const pending: { workspace: string; resolve: (files: { path: string; kind: "file" }[]) => void }[] = []
+  const mounted: { prompt?: PromptRef } = {}
+  screen = await testRender(() => (
+    <Prompt {...display} ref={(ref) => (mounted.prompt = ref)} sessionId={workspace()} cwd={`/tmp/${workspace()}`} onSubmit={() => {}}
+      suggestFiles={() => new Promise((resolve) => pending.push({ workspace: workspace(), resolve }))} />
+  ), { ...rendererOptions, width: 80, height: 24, kittyKeyboard: true })
+  await screen.flush()
+  mounted.prompt!.setText("@src")
+  await Bun.sleep(250)
+  expect(pending.map((request) => request.workspace)).toEqual(["mention-a"])
+  setWorkspace("mention-b")
+  await screen.flush()
+  mounted.prompt!.setText("@src")
+  await Bun.sleep(250)
+  expect(pending.map((request) => request.workspace)).toEqual(["mention-a", "mention-b"])
+  pending[1]!.resolve([{ path: "b-correct.ts", kind: "file" }])
+  await screen.flush()
+  pending[0]!.resolve([{ path: "a-stale.ts", kind: "file" }])
+  await screen.flush()
+  screen.mockInput.pressTab()
+  await screen.flush()
+  expect(mounted.prompt!.text()).toBe('"b-correct.ts"')
 })
