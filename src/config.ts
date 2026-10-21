@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -53,7 +53,10 @@ function readJsonc(file: string): any {
 export const config: PasodeConfig = readJsonc(configPath)
 
 export function pluginSpecs() {
-  return (config.plugins ?? []).map((entry) => {
+  const plugins = config.plugins ?? []
+  // The file is hand-edited JSON; report a bad value like a bad entry so the built-in features still load.
+  if (!Array.isArray(plugins)) return [{ spec: JSON.stringify(plugins), path: "", options: {}, error: '"plugins" must be an array' }]
+  return plugins.map((entry) => {
     const [spec, options] = Array.isArray(entry) ? entry : [entry, {}]
     // Reported per entry by the loader, so one bad entry doesn't skip the others.
     if (typeof spec !== "string") return { spec: String(JSON.stringify(entry)), path: "", options: {}, error: "expected a path or [path, options]" }
@@ -78,8 +81,13 @@ export function kvGet<T>(key: string, fallback: T): T {
 
 export function kvSet(key: string, value: unknown) {
   kv[key] = value
+  // Write beside the target and rename, so a crash mid-write never leaves a torn kv.json.
+  const temp = `${statePath}.${process.pid}.tmp`
   try {
     mkdirSync(path.dirname(statePath), { recursive: true })
-    writeFileSync(statePath, JSON.stringify(kv, null, 2))
-  } catch {} // preferences are best-effort
+    writeFileSync(temp, JSON.stringify(kv, null, 2))
+    renameSync(temp, statePath)
+  } catch { // preferences are best-effort
+    try { rmSync(temp, { force: true }) } catch {}
+  }
 }
