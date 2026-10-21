@@ -13,7 +13,7 @@ import { editPrompt } from "./editor"
 import { promptHistory } from "./history"
 import { mentionTrigger, quoteMention } from "./mention"
 import { PromptMetadata, takeWidth } from "./metadata"
-import { expandPasted, summarizePaste, type Pasted } from "./paste"
+import { appendSnapshot, expandPasted, summarizePaste, type Pasted } from "./paste"
 import { QueueDock } from "./queue"
 import { PromptSpinner } from "./spinner"
 import type { PromptProps, PromptRef, PromptSnapshot, PromptSubmit, SlashItem } from "./types"
@@ -45,6 +45,8 @@ export function Prompt(props: PromptProps) {
   let pasted: Pasted[] = []
   // The session whose draft is in the input (see the sessionId effect below).
   let owned: { id: string | undefined } | undefined
+  // The message handed to the host and not yet confirmed.
+  let sending: PromptSnapshot | undefined
   const [text, setTextSignal] = createSignal("")
   const [prefix, setPrefix] = createSignal("")
   const [images, setImages] = createSignal<PromptSubmit["images"]>([])
@@ -117,14 +119,18 @@ export function Prompt(props: PromptProps) {
   })
   // "@" paths from the daemon for the typed query, debounced like the Paseo app; the last answer stays up while the next loads.
   const [files, setFiles] = createSignal<{ path: string; kind: "file" | "directory" }[]>([])
+  const mentionQuery = createMemo(() => (props.focused && props.suggestFiles ? mention()?.query : undefined))
+  createEffect(on(() => props.cwd, () => setFiles([]), { defer: true })) // another workspace's paths aren't this one's
   createEffect(() => {
-    const query = props.focused && props.suggestFiles ? mention()?.query : undefined
+    const query = mentionQuery()
     void props.cwd
     if (query === undefined) return setFiles([])
+    // Rerunning (another query or workspace) drops the pending request, so a late answer can't replace newer results.
+    let stale = false
     const timer = setTimeout(() => {
-      props.suggestFiles!(query).then((found) => !disposed && mention()?.query === query && setFiles(found), () => setFiles([]))
+      props.suggestFiles!(query).then((found) => !stale && setFiles(found), () => !stale && setFiles([]))
     }, 180)
-    onCleanup(() => clearTimeout(timer))
+    onCleanup(() => ((stale = true), clearTimeout(timer)))
   })
   const fileOptions = createMemo<Option[]>(() => {
     if (!props.focused || dismissed() === completionKey() || !mention()) return []
@@ -233,8 +239,9 @@ export function Prompt(props: PromptProps) {
     let sent: PromptSnapshot | undefined
     try {
       await pasteQueue
-      if (disposed) return
-      sent = snapshot()
+      // Another session's input is showing by now (leave() kept this one's draft): don't send it.
+      if (disposed || owned !== started) return
+      sent = sending = snapshot()
       const attached = sent.images
       const value: PromptSubmit = { text: expandPasted(sent.text, sent.pasted), images: attached }
       if (!value.text.trim() && !value.images.length) return
@@ -244,18 +251,30 @@ export function Prompt(props: PromptProps) {
       // Do not discard edits or new images that arrived while the host was sending (or a draft of another session).
       if (!disposed && owned === started && current() === sent.text && images() === attached) clear()
     } catch (error) {
-      // Another session's draft is showing by now: the failed one goes back to its own.
-      if (sent && started && owned !== started) saveDraft(started.id, { ...sent, cursor: offsetWidth(sent.text) })
-      else report(error)
+      // The input stopped showing this session meanwhile: the failed message goes back to its draft.
+      if (sent && started && (disposed || owned !== started)) recover(started.id, sent)
+      if (owned?.id === started?.id) report(error)
     } finally {
       submitting = false
+      sending = undefined
     }
   }
 
-  // One draft per session (the home screen is undefined): leaving one saves it, entering restores it. A prompt being
-  // sent isn't saved, so the home prompt that unmounts when its first message opens a session doesn't leave a copy.
+  // Into the input when its session is showing again, else into that session's saved draft; after what was typed since.
+  function recover(id: string | undefined, failed: PromptSnapshot) {
+    if (!disposed && owned?.id === id) return restore(appendSnapshot(snapshot(), failed))
+    const merged = appendSnapshot(takeDraft(id) ?? { text: "", pasted: [], images: [] }, failed)
+    saveDraft(id, { ...merged, cursor: offsetWidth(merged.text) })
+  }
+
+  // One draft per session (the home screen is undefined): leaving one saves it, entering restores it. What is being
+  // sent isn't a draft, so the home prompt that unmounts when its first message opens a session doesn't leave a copy;
+  // edits made since the send began are.
   function leave() {
-    if (owned && !submitting && !renderer.isDestroyed) saveDraft(owned.id, { ...snapshot(), cursor: offsetWidth(prefix()) })
+    if (!owned || renderer.isDestroyed) return
+    const draft = snapshot()
+    if (sending && draft.text === sending.text && draft.images === sending.images) return
+    saveDraft(owned.id, { ...draft, cursor: offsetWidth(prefix()) })
   }
   createEffect(on(() => props.sessionId, (id) => {
     leave()

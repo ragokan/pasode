@@ -1,8 +1,9 @@
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, spyOn, test } from "bun:test"
 import { createSignal } from "solid-js"
 import { Prompt, type PromptRef } from "../src/prompt"
+import * as clipboard from "../src/prompt/clipboard"
 import { rendererOptions } from "../src/renderer"
 import { theme } from "../src/theme"
 
@@ -149,3 +150,81 @@ for (const outcome of ["fails", "succeeds"]) {
     expect(mounted.prompt?.text()).toBe(outcome === "fails" ? "slow message" : "")
   })
 }
+
+/** A Prompt whose host takes `sending` to answer a send, switchable between sessions. */
+async function mountSending(first: string, onSubmit: (input: { text: string }, id: string) => unknown) {
+  const [sessionId, setSessionId] = createSignal(first)
+  const mounted: { prompt?: PromptRef } = {}
+  screen = await testRender(() => (
+    <Prompt ref={(ref) => (mounted.prompt = ref)} focused sessionId={sessionId()} cwd="/tmp" slashItems={[]} agent={{ label: "Build", color: theme.agent }}
+      model={{ name: "Opus 5.5", provider: "Claude Code" }} location="~" status={{ running: false, interruptArmed: false }} onSubmit={(input) => onSubmit(input, sessionId()) as void} />
+  ), { ...rendererOptions, width: 80, height: 24 })
+  await screen.flush()
+  return { mounted, setSessionId }
+}
+
+test("a submit still waiting on a paste doesn't send the draft of the session you switched to", async () => {
+  let finishPaste!: (value: { text: string }) => void
+  const read = spyOn(clipboard, "readClipboard").mockImplementation(() => new Promise((resolve) => (finishPaste = resolve)))
+  try {
+    const sent: string[] = []
+    const { mounted, setSessionId } = await mountSending("late-paste-a", (input, id) => sent.push(`${id}:${input.text}`))
+    mounted.prompt!.setText("A draft")
+    screen!.mockInput.pressKey("v", { ctrl: true })
+    await screen!.flush()
+    const sending = mounted.prompt!.submit()
+    setSessionId("late-paste-b")
+    await screen!.flush()
+    mounted.prompt!.setText("B private draft")
+    finishPaste({ text: "paste for A" })
+    await sending
+    expect(sent).toEqual([])
+    expect(mounted.prompt!.text()).toBe("B private draft")
+    setSessionId("late-paste-a")
+    await screen!.flush()
+    expect(mounted.prompt!.text()).toBe("A draft") // kept as A's draft, unsent
+  } finally {
+    read.mockRestore()
+  }
+})
+
+test("edits made while a message is being sent survive switching away and back", async () => {
+  let finish!: () => void
+  const pending = new Promise<void>((resolve) => (finish = resolve))
+  const { mounted, setSessionId } = await mountSending("edit-during-a", () => pending)
+  mounted.prompt!.setText("message sent")
+  const sending = mounted.prompt!.submit()
+  await screen!.flush()
+  mounted.prompt!.setText("next unsent draft")
+  setSessionId("edit-during-b")
+  await screen!.flush()
+  finish()
+  await sending
+  setSessionId("edit-during-a")
+  await screen!.flush()
+  expect(mounted.prompt!.text()).toBe("next unsent draft")
+})
+
+test("a failed send comes back into the input when you returned to its session before it failed", async () => {
+  let fail!: (error: Error) => void
+  const pending = new Promise<void>((_, reject) => (fail = reject))
+  const { mounted, setSessionId } = await mountSending("fail-return-a", () => pending)
+  mounted.prompt!.setText("do not lose this message")
+  const sending = mounted.prompt!.submit()
+  await screen!.flush()
+  setSessionId("fail-return-b")
+  await screen!.flush()
+  setSessionId("fail-return-a")
+  await screen!.flush()
+  expect(mounted.prompt!.isEmpty()).toBe(true) // what is being sent isn't a draft
+  await mounted.prompt!.restore({ ...mounted.prompt!.snapshot(), text: "typed since" })
+  fail(new Error("daemon disconnected"))
+  await sending
+  await screen!.flush()
+  expect(mounted.prompt!.text()).toBe("typed since\n\ndo not lose this message")
+  setSessionId("fail-return-b")
+  await screen!.flush()
+  setSessionId("fail-return-a")
+  await screen!.flush()
+  expect(mounted.prompt!.text()).toBe("typed since\n\ndo not lose this message")
+})

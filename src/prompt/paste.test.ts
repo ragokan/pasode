@@ -36,3 +36,13 @@ test("appending a snapshot renames clashing tokens and keeps images", () => {
   const empty = { text: "", pasted: [], images: [] }
   expect(appendSnapshot(empty, next)).toBe(next)
 })
+
+test("restoring several pasted blocks onto a draft that has one keeps every block's text", () => {
+  const first = "[Pasted ~3 lines]"
+  const second = "[Pasted ~3 lines #2]"
+  const base = { text: first, pasted: [{ token: first, text: "A\nA\nA" }], images: [] }
+  const next = { text: `${first} then ${second}`, pasted: [{ token: first, text: "B\nB\nB" }, { token: second, text: "C\nC\nC" }], images: [] }
+  const joined = appendSnapshot(base, next)
+  expect(new Set(joined.pasted.map((part) => part.token)).size).toBe(3)
+  expect(expandPasted(joined.text, joined.pasted)).toBe("A\nA\nA\n\nB\nB\nB then C\nC\nC")
+})
