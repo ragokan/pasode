@@ -1,11 +1,15 @@
-import { expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
 import { lstat, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { listClaudeMcp, listCodexMcp, mcpCounts, setClaudeMcp, setMcpEnabled, setTomlEnabled, parseClaudeMcpList } from "./mcp"
 
+const root = mkdtempSync(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+afterAll(() => rmSync(root, { recursive: true, force: true }))
+
 test("claude: lists scopes and toggles projects[cwd].disabledMcpServers in place", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+  const dir = await mkdtemp(path.join(root, "dir-"))
   const file = path.join(dir, ".claude.json")
   const cwd = path.join(dir, "repo")
   const original = { oauthAccount: { email: "x" }, mcpServers: { a: {}, b: {} }, projects: { [cwd]: { mcpServers: { c: {} }, disabledMcpServers: ["b"], other: 1 } } }
@@ -80,7 +84,7 @@ test("home footer counts: enabled servers only; unchecked providers count enable
 })
 
 test("toggles write through a symlinked config instead of replacing the link", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+  const dir = await mkdtemp(path.join(root, "dir-"))
   const target = path.join(dir, "dotfiles.json")
   const link = path.join(dir, ".claude.json")
   await writeFile(target, JSON.stringify({ mcpServers: { a: {} } }))
@@ -92,7 +96,7 @@ test("toggles write through a symlinked config instead of replacing the link", a
 })
 
 test("codex: concurrent toggles both land", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "paseo-tui-mcp-"))
+  const dir = await mkdtemp(path.join(root, "dir-"))
   const env = { PASEO_HOME: process.env.PASEO_HOME, CODEX_HOME: process.env.CODEX_HOME }
   process.env.PASEO_HOME = dir
   process.env.CODEX_HOME = dir
