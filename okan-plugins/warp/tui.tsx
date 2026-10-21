@@ -1,7 +1,7 @@
 // Provenance: ~/coding/ocode/plugins/warp/src/{tui,v2,notify,title}.ts (Warp MIT).
 // .tsx makes OpenTUI's Solid transform bind these hooks to the host runtime too.
 import { writeFileSync } from "node:fs"
-import { createEffect, createSignal, onCleanup } from "solid-js"
+import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
 import { formatTitle, inKaku, inWarp, PLUGIN_VERSION, richSequence, SPINNER, SPINNER_MS, truncate, WARP_TITLE_MAX } from "./payload"
 import { createTransitions, type AgentState } from "./transitions"
@@ -96,9 +96,12 @@ export default {
     })
 
     const transitions = createTransitions()
+    // The workspace-title lookup behind sessionTitle ran for every agent on every update (and subscribed to all of them);
+    // only the agents that change state need it.
+    const titleOf = (agent: AgentState) => untrack(() => { const live = ctx.paseo.agents[agent.id]; return live ? ctx.paseo.sessionTitle(live) : agent.title })
     createEffect(() => {
       const agents = Object.values(ctx.paseo.agents).map((agent) => ({
-        id: agent.id, cwd: agent.cwd, title: ctx.paseo.sessionTitle(agent), status: agent.status,
+        id: agent.id, cwd: agent.cwd, title: agent.title, status: agent.status,
         pendingPermissions: [...agent.pendingPermissions], requiresAttention: agent.requiresAttention,
         attentionReason: agent.attentionReason, attentionTimestamp: agent.attentionTimestamp,
       }))
@@ -112,8 +115,8 @@ export default {
           if (onScreen) rich("prompt_submit", agent, { query: lastText(agent.id, "user_message") })
         } else if (change.event === "permission_request") {
           const pending = agent.pendingPermissions[0]
-          if (onScreen) rich("permission_request", agent, { summary: formatTitle(agent.title), tool_name: pending?.name ?? "permission", tool_input: pending?.input ?? {} })
-          if (onScreen && kaku) ctx.renderer.triggerNotification("Needs your input", formatTitle(agent.title, "🟡 "))
+          if (onScreen) rich("permission_request", agent, { summary: formatTitle(titleOf(agent)), tool_name: pending?.name ?? "permission", tool_input: pending?.input ?? {} })
+          if (onScreen && kaku) ctx.renderer.triggerNotification("Needs your input", formatTitle(titleOf(agent), "🟡 "))
         } else if (change.event === "permission_replied") {
           if (onScreen) rich("permission_replied", agent)
         } else if (change.event === "stop") {
@@ -121,7 +124,7 @@ export default {
           if (onScreen) rich("stop", agent, { query: lastText(agent.id, "user_message"), response: lastText(agent.id, "assistant_message"), transcript_path: "" })
           // Kaku, like ocode there: one notification per event, only for the session on screen.
           if (onScreen && kaku) {
-            const title = formatTitle(agent.title, change.outcome === "error" ? "🔴 " : "✓ ")
+            const title = formatTitle(titleOf(agent), change.outcome === "error" ? "🔴 " : "✓ ")
             ctx.renderer.triggerNotification(lastText(agent.id, "assistant_message").replace(/\s+/g, " ") || "Session done", title)
           }
         } else if (change.event === "settled" && onScreen && busy.has(agent.id)) {

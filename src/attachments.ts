@@ -5,13 +5,19 @@ type Image = { data: string; mimeType: string }
 type Attachment = { mimeType: string; data?: string; name?: string }
 
 // Paseo's timeline keeps a user message's text but not its images, so remember what this client sent:
-// bytes for this run, mime types across restarts (kv.json, newest LIMIT messages).
+// bytes for this run (newest KEEP messages: base64 images are megabytes), mime types across restarts (kv.json, newest LIMIT messages).
 const LIMIT = 300
+const KEEP = 10
 const bytes = new Map<string, Image[]>()
 
 export function rememberImages(messageId: string, images: Image[] | undefined) {
   if (!images?.length) return
+  bytes.delete(messageId)
   bytes.set(messageId, images)
+  for (const oldest of bytes.keys()) {
+    if (bytes.size <= KEEP) break
+    bytes.delete(oldest)
+  }
   const saved = Object.entries(kvGet<Record<string, string[]>>("attachments", {}))
   kvSet("attachments", Object.fromEntries([...saved, [messageId, images.map((image) => image.mimeType)]].slice(-LIMIT)))
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { applyPatch, parsePatch } from "diff"
-import { collapseToolOutput, editDiff, filetype, reasoningSummary, timestampLabel } from "./helpers"
+import { collapseToolOutput, editDiff, filetype, reasoningSummary, senderLabel, timestampLabel } from "./helpers"
 
 describe("editDiff", () => {
   test("keeps an existing unified diff", () => {
@@ -63,4 +63,10 @@ test("timestamps show time today, date and time otherwise; invalid timestamps ar
   expect(timestampLabel(today.getTime(), today)).toBe(time)
   expect(timestampLabel(yesterday.getTime(), today)).toBe(`${yesterday.toLocaleDateString()} ${time}`)
   expect(timestampLabel(NaN, today)).toBe("")
+})
+
+test("an agent message's sender is its title, else its id with a UUID shortened", () => {
+  expect(senderLabel({ id: "3f2a9c1e-0b7d-4e55-9a31-5d0c7e8b1a42", title: " Reviewer " })).toBe("Reviewer")
+  expect(senderLabel({ id: "3f2a9c1e-0b7d-4e55-9a31-5d0c7e8b1a42" })).toBe("3f2a9c1e")
+  expect(senderLabel({ id: "remote::worker", title: "" })).toBe("remote::worker")
 })

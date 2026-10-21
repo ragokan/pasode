@@ -101,18 +101,12 @@ export function DialogSelect<T>(props: {
     if (!needle) return props.options
     return props.options.filter((option) => fuzzy(needle, `${option.title} ${option.category ?? ""}`.toLowerCase()))
   })
-  // Keep category order as given; filtering flattens nothing, it just hides misses.
-  const grouped = createMemo(() => {
-    const groups: [string, { option: SelectOption<T>; index: number }[]][] = []
-    filtered().forEach((option, index) => {
-      const category = option.category ?? ""
-      const last = groups.at(-1)
-      if (last && last[0] === category) last[1].push({ option, index })
-      else groups.push([category, [{ option, index }]])
-    })
-    return groups
-  })
-  const rows = createMemo(() => filtered().length + grouped().filter(([c]) => c).length * 2)
+  // A category header starts each run of options sharing one (category order is as given; filtering just hides misses).
+  const heading = (index: number) => {
+    const category = filtered()[index]?.category
+    return category && category !== filtered()[index - 1]?.category ? category : undefined
+  }
+  const rows = createMemo(() => filtered().length + filtered().filter((_, index) => heading(index)).length * 2)
   const height = createMemo(() => Math.max(1, Math.min(rows(), Math.floor(dimensions().height / 2) - 6)))
 
   createEffect(
@@ -193,52 +187,52 @@ export function DialogSelect<T>(props: {
         }
       >
         <scrollbox ref={(r: ScrollBoxRenderable) => (scroll = r)} paddingLeft={1} paddingRight={1} height={height()} scrollbarOptions={{ visible: false }}>
-          <For each={grouped()}>
-            {([category, items], groupIndex) => (
-              <>
-                <Show when={category}>
-                  <box paddingTop={groupIndex() > 0 ? 1 : 0} paddingLeft={3}>
-                    <text fg={theme.accent} attributes={TextAttributes.BOLD}>
-                      {category}
-                    </text>
-                  </box>
-                </Show>
-                <For each={items}>
-                  {({ option, index }) => {
-                    const active = () => index === selected()
-                    const isCurrent = () => props.current !== undefined && option.value === props.current
-                    const fg = () => (active() ? theme.selectedListItemText : isCurrent() ? theme.primary : theme.text)
-                    return (
-                      <box
-                        id={`dialog-option-${index}`}
-                        flexDirection="row"
-                        gap={1}
-                        paddingLeft={isCurrent() || option.gutter ? 1 : 3}
-                        paddingRight={3}
-                        backgroundColor={active() ? (option.bg ?? theme.primary) : RGBA.fromInts(0, 0, 0, 0)}
-                        onMouseOver={() => setSelected(index)}
-                        onMouseUp={() => submit(option)}
-                      >
-                        <Show when={option.gutter} fallback={<Show when={isCurrent()}><text fg={fg()}>●</text></Show>}>
-                          {option.gutter!()}
-                        </Show>
-                        <text flexGrow={1} fg={fg()} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
-                          {truncate(option.title, 61)}
-                          <Show when={option.description}>
-                            <span style={{ fg: active() ? theme.selectedListItemText : theme.textMuted }}> {option.description}</span>
-                          </Show>
+          {/* Rows are keyed by option.value: a live list rebuilds its options per event, and keying by the option objects remounted every row. */}
+          <For each={filtered().map((option) => option.value)}>
+            {(_, index) => {
+              const option = () => filtered()[index()]!
+              const active = () => index() === selected()
+              const isCurrent = () => props.current !== undefined && option().value === props.current
+              const fg = () => (active() ? theme.selectedListItemText : isCurrent() ? theme.primary : theme.text)
+              return (
+                <>
+                  <Show when={heading(index())}>
+                    {(category) => (
+                      <box paddingTop={index() > 0 ? 1 : 0} paddingLeft={3}>
+                        <text fg={theme.accent} attributes={TextAttributes.BOLD}>
+                          {category()}
                         </text>
-                        <Show when={option.footer}>
-                          <text flexShrink={0} fg={active() ? theme.selectedListItemText : theme.textMuted}>
-                            {option.footer}
-                          </text>
-                        </Show>
                       </box>
-                    )
-                  }}
-                </For>
-              </>
-            )}
+                    )}
+                  </Show>
+                  <box
+                    id={`dialog-option-${index()}`}
+                    flexDirection="row"
+                    gap={1}
+                    paddingLeft={isCurrent() || option().gutter ? 1 : 3}
+                    paddingRight={3}
+                    backgroundColor={active() ? (option().bg ?? theme.primary) : RGBA.fromInts(0, 0, 0, 0)}
+                    onMouseOver={() => setSelected(index())}
+                    onMouseUp={() => submit(option())}
+                  >
+                    <Show when={option().gutter} fallback={<Show when={isCurrent()}><text fg={fg()}>●</text></Show>}>
+                      {option().gutter!()}
+                    </Show>
+                    <text flexGrow={1} fg={fg()} attributes={active() ? TextAttributes.BOLD : undefined} wrapMode="none" overflow="hidden">
+                      {truncate(option().title, 61)}
+                      <Show when={option().description}>
+                        <span style={{ fg: active() ? theme.selectedListItemText : theme.textMuted }}> {option().description}</span>
+                      </Show>
+                    </text>
+                    <Show when={option().footer}>
+                      <text flexShrink={0} fg={active() ? theme.selectedListItemText : theme.textMuted}>
+                        {option().footer}
+                      </text>
+                    </Show>
+                  </box>
+                </>
+              )
+            }}
           </For>
         </scrollbox>
       </Show>

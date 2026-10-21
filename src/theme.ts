@@ -182,5 +182,8 @@ export const syntax = syntaxStyle
 /** Swap the whole palette (theme switcher / config). */
 export function applyTheme(colors: ThemeColors) {
   setThemeStore(reconcile({ ...colors }))
+  const previous = syntaxStyle()
   setSyntaxStyle(buildSyntax(colors))
+  // A destroyed style throws if a renderable still draws with it, so free the old native one once they have all switched.
+  setTimeout(() => previous.destroy(), 2000).unref()
 }

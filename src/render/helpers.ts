@@ -52,3 +52,8 @@ export function timestampLabel(timestamp: number, now = new Date()) {
   const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
   return date.toDateString() === now.toDateString() ? time : `${date.toLocaleDateString()} ${time}`
 }
+
+/** Who an agent-to-agent message came from: the sender's title, else its id (a UUID shortened like `paseo ls`). */
+export function senderLabel(sender: { id: string; title?: string }) {
+  return sender.title?.trim() || sender.id.replace(/^([0-9a-f]{8})-[0-9a-f-]{27}$/i, "$1")
+}

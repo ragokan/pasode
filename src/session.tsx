@@ -2,11 +2,13 @@ import type { AgentPermissionRequest, AgentPermissionResponse, ToolCallDetail } 
 import { RGBA, SyntaxStyle, TextAttributes, type InputRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
+import { unwrap } from "solid-js/store"
 import { dialog, truncate } from "./dialog"
 import type { Mark } from "./paseo"
+import { spinnerTick } from "./prompt/spinner"
 import { truncateFilePath } from "./render/file-path"
 import { activitySummary, explorationSummary, groupTranscript, nodesBefore, reasoningContent, reasoningTitle, type GroupKind, type Grouping, type TranscriptNode, type Verbosity } from "./render/grouping"
-import { collapseToolOutput, editDiff, filetype, reasoningSummary, timestampLabel } from "./render/helpers"
+import { collapseToolOutput, editDiff, filetype, reasoningSummary, senderLabel, timestampLabel } from "./render/helpers"
 import { collapseShellOutput } from "./render/shell-output"
 import { durationLabel, turnFooters, type TurnFooter } from "./render/turns"
 import { prefs } from "./state"
@@ -31,13 +33,9 @@ export const SplitBorder = { ...EmptyBorder, vertical: "┃" }
 
 const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 export function Spinner(props: { color?: typeof theme.text; children?: string }) {
-  const [frame, setFrame] = createSignal(0)
-  createEffect(() => {
-    if (!prefs.animations) return
-    // Half OpenCode's 12.5 fps: every other frame, same cycle time, half the redraws.
-    const timer = setInterval(() => setFrame((value) => (value + 2) % frames.length), 160)
-    onCleanup(() => clearInterval(timer))
-  })
+  const tick = spinnerTick()
+  // Half OpenCode's 12.5 fps: every other frame, same cycle time, half the redraws.
+  const frame = createMemo(() => (Math.floor(tick() / 2) * 2) % frames.length)
   return (
     <text fg={props.color ?? theme.textMuted}>
       {/* OpenCode's still glyph with animations off. */}
@@ -49,6 +47,8 @@ export function Spinner(props: { color?: typeof theme.text; children?: string })
 
 export type TranscriptProps = {
   rows: AgentTimelineItem[]
+  /** The timeline store's `revision`. Given, the whole-timeline memos track it (and the length) instead of every row; leave it out for rows that aren't that store. */
+  revision?: number
   times: number[]
   marks: Mark[]
   running: boolean
@@ -86,19 +86,22 @@ const openByDefault = (kind: GroupKind, transcript: TranscriptProps) => transcri
 
 // Ported from OpenCode 2.0.26 routes/session/index.tsx row dispatch (MIT); see render/OPENCODE-LICENSE.
 export function Transcript(props: TranscriptProps): JSX.Element {
-  const nodes = createMemo(() => groupTranscript(props.rows, props.verbosity))
-  const footers = createMemo(() => turnFooters(props.rows, props.times, props.marks, props.running))
+  // Read the raw arrays: through the store proxy each memo subscribed to every row field and re-read the whole timeline per event.
+  const track = () => (props.revision, props.rows.length)
+  const raw = <T extends object>(value: T) => (props.revision === undefined ? value : unwrap(value))
+  const nodes = createMemo(() => (track(), groupTranscript(raw(props.rows), props.verbosity)))
+  const footers = createMemo(() => (track(), props.marks.length, turnFooters(raw(props.rows), raw(props.times), raw(props.marks), props.running)))
   // OpenCode's tail-first mounting: only the newest nodes mount; older ones mount on demand. Budgeted like its
   // rowWeight: a collapsed group costs one, a group showing its rows costs each of them.
   const weights = createMemo(() => nodes().map((node) => node.type === "group" && (!grouped(node.kind, props) || openByDefault(node.kind, props)) ? node.indices.length : 1))
   /** First mounted row while pinned, and the first timeline row then; unset follows the tail. */
   const [pinned, setPinned] = createSignal<{ row: number; head: AgentTimelineItem | undefined }>()
-  const pinAt = (row: number) => setPinned({ row, head: props.rows[0] })
+  const pinAt = (row: number) => setPinned({ row, head: raw(props.rows)[0] })
   const first = createMemo(() => {
     const pin = pinned()
     // History prepended since (loadOlder) moves the pinned row down with it, in this same pass: an effect would
     // first mount the whole prepended page.
-    const row = pin && pin.row + (pin.head ? Math.max(0, props.rows.indexOf(pin.head)) : 0)
+    const row = pin && pin.row + (pin.head ? Math.max(0, (track(), raw(props.rows)).indexOf(pin.head)) : 0)
     const at = row === undefined ? Infinity : Math.max(0, nodes().findLastIndex((node) => node.index <= row))
     return Math.min(at, nodesBefore(weights(), weights().length, TAIL))
   })
@@ -484,6 +487,19 @@ function BlockTool(props: { tool: ToolCallTimelineItem; title?: string; path?: {
 type ToolProps = { tool: ToolCallTimelineItem; separate: boolean; showDetails: boolean; diffStyle?: "unified" | "split" | "auto"; transcript?: boolean }
 // Ported from OpenCode 2.0.26 per-tool dispatch/renderers (MIT); see render/OPENCODE-LICENSE.
 function ToolRow(props: ToolProps) {
+  return <Show when={props.tool.agentMessage} fallback={<ToolCall {...props} />}>{(message) => <AgentMessageRow message={message()} />}</Show>
+}
+
+// Paseo 0.12 reports a message between agents as a tool call carrying `agentMessage`; show it as a message, like the Paseo app.
+const agentEvents = { message: "", finished: " · finished", errored: " · errored", "permission-required": " · needs permission", closed: " · closed" }
+function AgentMessageRow(props: { message: NonNullable<ToolCallTimelineItem["agentMessage"]> }) {
+  return <box border={["left"]} customBorderChars={SplitBorder} borderColor={props.message.event === "errored" ? theme.error : theme.info} backgroundColor={theme.backgroundPanel} paddingLeft={2} paddingTop={1} paddingBottom={1} flexShrink={0}>
+    <text fg={theme.textMuted}>from {senderLabel(props.message.sender)}{agentEvents[props.message.event]}</text>
+    <Show when={props.message.text.trim()}><text fg={theme.text}>{props.message.text.trim()}</text></Show>
+  </box>
+}
+
+function ToolCall(props: ToolProps) {
   const renderer = useRenderer()
   const [errorExpanded, setErrorExpanded] = createSignal(false)
   const summary = createMemo(() => toolSummary(props.tool))
