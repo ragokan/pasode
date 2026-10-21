@@ -1,12 +1,17 @@
-import type { TestRendererSetup } from "@opentui/core/testing"
+import type { InputRenderable } from "@opentui/core"
+import { pasteBytes, type TestRendererSetup } from "@opentui/core/testing"
 import { testRender, useRenderer } from "@opentui/solid"
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test"
+import { createRoot } from "solid-js"
+import { runCommand } from "../src/commands"
+import { Composer } from "../src/composer"
 import { DialogHost, dialog } from "../src/dialog"
 import { ChangesView, closeChanges, openChanges } from "../src/git/changes"
 import { daemon, setAgents, type PaseoAgent } from "../src/paseo"
 import { loadPlugins } from "../src/plugin"
 import { Sidebar, sidebarFeatures } from "../src/sidebar"
 import { setAgentId, setToast, toast } from "../src/state"
+import { paneFocused, registerTerminalCommands, useTerminalFeed } from "../src/terminal"
 
 let screen: TestRendererSetup | undefined
 const spies: { mockRestore(): void }[] = []
@@ -279,4 +284,107 @@ test("sidebar Git section: branch with ahead/behind and live change counts; hidd
   push({ files: [files[0]!] })
   await screen.renderOnce()
   expect(frame()).toContain("+3 −1 · 1 file")
+})
+
+test("modified keys never act: ctrl+p (the palette shortcut) doesn't push, ctrl+d doesn't discard, shift+c doesn't commit", async () => {
+  const pushed = spyOn(daemon, "checkoutPush").mockImplementation((async () => ({ success: true, error: null })) as never)
+  spies.push(pushed)
+  statusNow = { ...statusNow, aheadOfOrigin: 1 }
+  await open()
+  expect(frame()).toContain("p push")
+  const { mockInput } = screen!
+  mockInput.pressKey("p", { ctrl: true })
+  mockInput.pressKey("p", { meta: true })
+  mockInput.pressKey("p", { shift: true })
+  mockInput.pressKey("d", { ctrl: true })
+  mockInput.pressKey("c", { shift: true })
+  await screen!.renderOnce()
+  await Bun.sleep(0)
+  expect(pushed).not.toHaveBeenCalled()
+  expect(dialog.isOpen).toBe(false)
+  expect(toast()).toBeUndefined()
+  await type("p")
+  await Bun.sleep(0)
+  expect(pushed).toHaveBeenCalledTimes(1)
+})
+
+test("discarding a renamed file sends both paths (once each); D covers every file's paths", async () => {
+  const discarded: string[][] = []
+  spies.push(spyOn(daemon, "checkoutDiscardChanges").mockImplementation((async (_cwd: string, input: { paths: string[] }) => (discarded.push(input.paths), { success: true, error: null })) as never))
+  const renamed = file("renamed.txt", 0, 0, { oldPath: "original.txt" })
+  screen = await testRender(() => <><ChangesView /><DialogHost /></>, { width: 120, height: 30 })
+  openChanges()
+  await screen.renderOnce()
+  push({ files: [renamed, file("src/a.ts", 1, 1)] })
+  await screen.renderOnce()
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  expect(frame()).toMatch(/R\s+renamed\.txt/)
+  await type("d")
+  expect(frame()).toContain("Discard renamed.txt")
+  screen.mockInput.pressEnter()
+  await screen.renderOnce()
+  await Bun.sleep(0)
+  expect(discarded).toEqual([["renamed.txt", "original.txt"]])
+  await type("D")
+  screen.mockInput.pressEnter()
+  await screen.renderOnce()
+  await Bun.sleep(0)
+  expect(discarded.at(-1)).toEqual(["renamed.txt", "original.txt", "src/a.ts"])
+})
+
+test("pastes are consumed too: neither a focused input nor a global paste handler underneath sees them", async () => {
+  const seen = mock(() => {})
+  let field: InputRenderable | undefined
+  screen = await testRender(() => {
+    useRenderer().keyInput.on("paste", seen)
+    return <><input focused ref={(r: InputRenderable) => (field = r)} /><ChangesView /><DialogHost /></>
+  }, { width: 120, height: 30 })
+  openChanges()
+  await screen.renderOnce()
+  push({ files })
+  await screen.renderOnce()
+  screen.renderer.keyInput.processPaste(pasteBytes("echo modal-leak\n"), undefined as never)
+  expect(seen).not.toHaveBeenCalled()
+  expect(field!.value).toBe("")
+  closeChanges()
+  await screen.renderOnce()
+  screen.renderer.keyInput.processPaste(pasteBytes("echo after"), undefined as never)
+  expect(seen).toHaveBeenCalledTimes(1)
+  expect(field!.value).toBe("echo after")
+})
+
+test("a focused terminal pane is released while Changes is open (nothing is pasted into the shell) and focused again on close", async () => {
+  const feed = () => {
+    const observers: { snapshot(value: unknown): void; update(message: unknown): void }[] = []
+    const value = { ready: Promise.resolve({}), subscriptionId: "s", subscribe: (observer: (typeof observers)[number]) => (observers.push(observer), () => {}), release: async () => {} }
+    return { feed: value as never, snapshot: (payload: unknown) => observers.forEach((o) => o.snapshot(payload)) }
+  }
+  const list = feed()
+  spies.push(spyOn(daemon, "observeTerminals").mockReturnValue(list.feed))
+  spies.push(spyOn(daemon, "observeTerminal").mockReturnValue(feed().feed))
+  const input = spyOn(daemon, "sendTerminalInput").mockImplementation(() => {})
+  spies.push(input)
+  const dispose = createRoot((dispose) => (useTerminalFeed(), registerTerminalCommands(), dispose))
+  list.snapshot({ cwd: "/tmp/g", terminals: [{ id: "sh1", name: "pasode" }] })
+  screen = await testRender(() => <><Composer /><ChangesView /><DialogHost /></>, { width: 120, height: 40 })
+  runCommand("terminal.toggle")
+  await Bun.sleep(0)
+  await screen.renderOnce()
+  await screen.renderOnce()
+  expect(paneFocused()).toBe(true)
+
+  openChanges()
+  await screen.renderOnce()
+  push({ files })
+  await screen.renderOnce()
+  expect(paneFocused()).toBe(false)
+  screen.renderer.keyInput.processPaste(pasteBytes("echo modal-leak\n"), undefined as never)
+  expect(input.mock.calls.filter(([, message]) => message.type === "input")).toEqual([])
+
+  closeChanges()
+  await screen.renderOnce()
+  expect(paneFocused()).toBe(true)
+  runCommand("terminal.close")
+  dispose()
 })

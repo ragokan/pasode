@@ -1,7 +1,7 @@
 import type { ParsedDiffFile } from "@getpaseo/protocol/messages"
 import { parsePatch } from "diff"
 import { expect, test } from "bun:test"
-import { branchLabel, canCommit, canCreatePr, canPull, canPush, checkCounts, kindOf, mergeBlocker, mergeMethods, patchOf, totals, type Pr, type PrPayload, type Status } from "./model"
+import { branchLabel, canCommit, canCreatePr, canPull, canPush, checkCounts, kindOf, mergeBlocker, mergeMethods, patchOf, pathsOf, totals, type Pr, type PrPayload, type Status } from "./model"
 
 const file = (over: Partial<ParsedDiffFile> = {}): ParsedDiffFile => ({
   path: "src/a.ts", isNew: false, isDeleted: false, additions: 2, deletions: 1,
@@ -111,4 +111,10 @@ test("a PR can be created from a branch ahead of its base, when the forge works"
   expect(canCreatePr(status(), forge(true))).toBe(false)
   expect(canCreatePr(status({ currentBranch: "main", aheadBehind: { ahead: 2, behind: 0 } }), forge(true))).toBe(false)
   expect(canCreatePr(notGit, forge(true))).toBe(false)
+})
+
+test("pathsOf covers both sides of a rename, once", () => {
+  expect(pathsOf([file()])).toEqual(["src/a.ts"])
+  expect(pathsOf([file({ path: "renamed.txt", oldPath: "original.txt" })])).toEqual(["renamed.txt", "original.txt"])
+  expect(pathsOf([file({ oldPath: "src/a.ts" }), file({ path: "b.ts" }), file({ path: "b.ts" })])).toEqual(["src/a.ts", "b.ts"])
 })
