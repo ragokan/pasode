@@ -1,5 +1,6 @@
 import { render } from "@opentui/solid"
 import { App } from "./app"
+import { startLocalDaemon } from "./local-daemon"
 import { sessionEpilogue } from "./logo"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
 import { rendererOptions } from "./renderer"
@@ -20,6 +21,7 @@ if (arg === "-h" || arg === "--help") {
 }
 
 try {
+  await startLocalDaemon()
   await connect()
 } catch (error) {
   console.error(`Could not reach the Paseo daemon: ${error instanceof Error ? error.message : error}`)

@@ -15,7 +15,9 @@ bun bin/paseo-tui.ts -s 1c9a5b6 # open a session (full ID or `paseo ls` prefix; 
 On your PATH: `chmod +x bin/paseo-tui.ts && ln -s "$PWD/bin/paseo-tui.ts" ~/.local/bin/paseo-tui`.
 
 Connects to `daemon.listen` from `~/.paseo/config.json` (`127.0.0.1:6767`). Env: `PASEO_URL`
-(e.g. `ws://host:6767/ws`), `PASEO_PASSWORD`, `PASEO_HOME`, `PASODE_CONFIG_DIR`.
+(e.g. `ws://host:6767/ws`), `PASEO_PASSWORD`, `PASEO_HOME`, `PASODE_CONFIG_DIR`. Without `PASEO_URL`, if nothing
+listens on that local address, pasode starts the daemon with `paseo daemon start` (Paseo.app's bundled CLI on macOS);
+it keeps running after pasode exits.
 
 Everything is live: sessions started from the Paseo app or your phone show up under **Running** in
 `ctrl+x l`; open one to attach to its stream.
