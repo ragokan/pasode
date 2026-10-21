@@ -15,7 +15,7 @@ import { footerLayout, liveLabel, usageItems } from "./footer"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
-import { agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, type PaseoAgent } from "./paseo"
+import { active, agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, waiting, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
 import { Prompt, type PromptRef, type PromptSubmit } from "./prompt"
 import { renameArgument } from "./prompt/slash"
@@ -28,7 +28,6 @@ import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
 import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
 
-const active = (agent: PaseoAgent) => agent.status === "running" || !!agent.pendingPermissions?.length
 const home = os.homedir()
 const tilde = (value: string) => value.replace(home, "~")
 
@@ -223,13 +222,14 @@ export function App(props: { initialAgentId?: string }) {
     const [confirm, setConfirm] = createSignal<string>()
     const options = createMemo(() =>
       Object.values(agents)
-        .toSorted((a, b) => Number(active(b)) - Number(active(a)) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        .map((agent) => ({ agent, rank: active(agent) ? 2 : waiting(agent) ? 1 : 0 }))
+        .toSorted((a, b) => b.rank - a.rank || Date.parse(b.agent.updatedAt) - Date.parse(a.agent.updatedAt))
         .map(
-          (agent): SelectOption<string> => ({
+          ({ agent, rank }): SelectOption<string> => ({
             title: confirm() === agent.id ? "Press ctrl+d again to archive" : sessionTitle(agent) || "Untitled",
             bg: confirm() === agent.id ? theme.error : undefined,
             value: agent.id,
-            category: active(agent) ? "Running" : dayCategory(agent.updatedAt),
+            category: rank === 2 ? "Running" : rank === 1 ? "Waiting" : dayCategory(agent.updatedAt),
             footer: `${agent.provider} · ${path.basename(agent.cwd)}`,
             gutter:
               agent.status === "running"
@@ -238,7 +238,9 @@ export function App(props: { initialAgentId?: string }) {
                   ? () => <text fg={theme.warning}>△</text>
                   : agent.status === "error"
                     ? () => <text fg={theme.error}>✕</text>
-                    : undefined,
+                    : rank === 1
+                      ? () => <Spinner />
+                      : undefined,
           }),
         ),
     )

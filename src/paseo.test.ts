@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
 import { createRoot, createEffect } from "solid-js"
-import { agents, api, daemon, loadOlder, openSubagentTimeline, openTimeline, sessionTitle, setAgents, setWorkspaceTitles, timeline, type PaseoAgent } from "./paseo"
+import { agents, api, daemon, loadOlder, openSubagentTimeline, openTimeline, sessionTitle, setAgents, setWorkspaceTitles, timeline, waiting, type PaseoAgent } from "./paseo"
 
 const agent = (id: string, workspaceId: string, title: string) => ({ id, workspaceId, title }) as PaseoAgent
 
@@ -17,6 +17,24 @@ test("a lone session shows its workspace's generated title, live; shared workspa
   setWorkspaceTitles("w", "Shared workspace")
   setAgents("b", agent("b", "w", "Child task"))
   expect([sessionTitle(agents.a!), sessionTitle(agents.b!)]).toEqual(["Lets update our packages to latest bun", "Child task"])
+})
+
+test("subagents spawned into the parent's workspace don't take its title away", () => {
+  const child = (id: string, parent: string, title: string) => ({ ...agent(id, "w", title), labels: { "paseo.parent-agent-id": parent } }) as PaseoAgent
+  setAgents({ a: agent("a", "w", "I want to fork warp"), b: child("b", "a", "Warper perf commits"), c: child("c", "b", "Benchmark") })
+  setWorkspaceTitles({ w: "Analyze Warp fork" })
+  expect([sessionTitle(agents.a!), sessionTitle(agents.b!), sessionTitle(agents.c!)]).toEqual(["Analyze Warp fork", "Warper perf commits", "Benchmark"])
+  setAgents("d", agent("d", "w", "Unrelated session"))
+  expect(sessionTitle(agents.a!)).toBe("I want to fork warp")
+})
+
+test("an idle session is waiting while any subagent below it still runs", () => {
+  const at = (id: string, status: PaseoAgent["status"], parent?: string) =>
+    ({ ...agent(id, "w", id), status, labels: parent ? { "paseo.parent-agent-id": parent } : {} }) as PaseoAgent
+  setAgents({ a: at("a", "idle"), b: at("b", "idle", "a"), c: at("c", "running", "b"), d: at("d", "idle") })
+  expect(["a", "b", "c", "d"].map((id) => waiting(agents[id]!))).toEqual([true, true, false, false])
+  setAgents("c", "status", "idle")
+  expect(waiting(agents.a!)).toBe(false)
 })
 
 const realRef = api.agents.ref

@@ -77,9 +77,22 @@ async function watchWorkspaces() {
   })
 }
 
-/** The agent's own workspace, if no other live agent shares it. */
+/** Whether `agent` is a subagent of `ancestorId`, directly or through other subagents. */
+export const spawnedBy = (agent: PaseoAgent | undefined, ancestorId: string): boolean => {
+  const parent = agent?.labels?.["paseo.parent-agent-id"]
+  return !!parent && (parent === ancestorId || spawnedBy(agents[parent], ancestorId))
+}
+
+export const active = (agent: PaseoAgent) => agent.status === "running" || !!agent.pendingPermissions?.length
+/** Idle, but a subagent it spawned is still working, so the session isn't done. */
+export const waiting = (agent: PaseoAgent) => !active(agent) && Object.values(agents).some((other) => active(other) && spawnedBy(other, agent.id))
+
+/** The agent's own workspace, if no other live agent shares it; subagents it spawned there don't count. */
 export const ownWorkspace = (agent: PaseoAgent) =>
-  agent.workspaceId && Object.values(agents).every((other) => other.id === agent.id || other.workspaceId !== agent.workspaceId) ? agent.workspaceId : undefined
+  agent.workspaceId &&
+  Object.values(agents).every((other) => other.id === agent.id || other.workspaceId !== agent.workspaceId || spawnedBy(other, agent.id))
+    ? agent.workspaceId
+    : undefined
 
 /**
  * Paseo auto-names the session's workspace after the first message (the agent keeps the prompt's first line), so a
