@@ -19,8 +19,11 @@ afterEach(() => {
 
 /** The real app on a fake session (no daemon): the scroll wiring around the transcript's tail-first window. */
 async function openApp(rows: AgentTimelineItem[], paging: { hasOlder: boolean; startCursor?: { epoch: string; seq: number } } = { hasOlder: false }) {
+  // Sessions other test files left open would show the tab bar and shift these tests' hard-coded rows.
+  setPref("tabs", false)
   const screen = await testRender(() => <App />, { width: 100, height: 40 })
   cleanup = () => {
+    setPref("tabs", true)
     setAgentId(undefined)
     setTimeline({ agentId: undefined, rows: [], times: [], marks: [], hasOlder: false, startCursor: undefined })
     screen.renderer.destroy()

@@ -37,3 +37,16 @@ test("matches sequences with pending prefixes", () => {
   expect(keymap.pending).toBe(false)
   expect(keymap.feed(key("a"))).toBeUndefined()
 })
+
+test("punctuation strokes: `.` and `,` bind, and a trailing comma is the key, not a separator", () => {
+  expect(parseBinding("<leader>.")).toEqual([[key("x", { ctrl: true }), key(".")]])
+  expect(parseBinding("<leader>,")).toEqual([[key("x", { ctrl: true }), key(",")]])
+  expect(parseBinding("<leader>1,ctrl+1")).toEqual([[key("x", { ctrl: true }), key("1")], [key("1", { ctrl: true })]])
+  expect(parseBinding("<leader>,,ctrl+k")).toEqual([[key("x", { ctrl: true }), key(",")], [key("k", { ctrl: true })]])
+  expect(parseBinding("ctrl+k,<leader>,")).toEqual([[key("k", { ctrl: true })], [key("x", { ctrl: true }), key(",")]])
+  expect(formatBinding("<leader>,")).toBe("ctrl+x ,")
+  expect(formatBinding("<leader>.,ctrl+k")).toBe("ctrl+x .")
+  const keymap = createKeymap(() => [{ id: "previous", sequences: parseBinding("<leader>,") }])
+  keymap.feed(key("x", { ctrl: true }))
+  expect(keymap.feed(key(","))).toBe("previous")
+})

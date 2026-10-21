@@ -49,6 +49,7 @@ export type Prefs = {
   themeMode: "dark" | "light"
   animations: boolean
   mouse: boolean
+  tabs: boolean
 }
 const defaults: Prefs = {
   thinking: config.session?.thinking ?? "show",
@@ -69,6 +70,7 @@ const defaults: Prefs = {
   themeMode: config.theme?.mode ?? "dark",
   animations: config.animations ?? true,
   mouse: config.mouse ?? true,
+  tabs: true,
 }
 const saved = kvGet<Partial<Prefs> & { thinking?: string }>("prefs", {})
 // The old "collapsed" thinking mode became OpenCode's verbosity grouping.

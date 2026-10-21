@@ -11,8 +11,7 @@ const aliases: Record<string, string> = { enter: "return", esc: "escape", cmd: "
  */
 export function parseBinding(spec: string | undefined, leader = "ctrl+x"): Stroke[][] {
   if (!spec || spec === "none") return []
-  return spec
-    .split(",")
+  return alternatives(spec)
     .map((alternative) =>
       alternative
         .trim()
@@ -24,6 +23,9 @@ export function parseBinding(spec: string | undefined, leader = "ctrl+x"): Strok
     // A typo'd modifier (control+x) drops its alternative rather than binding bare x, which would fire while typing.
     .filter((sequence): sequence is Stroke[] => sequence.length > 0 && !sequence.includes(undefined))
 }
+
+// A "," doubled or ending the spec is the comma key (`<leader>,`), not a separator.
+const alternatives = (spec: string) => spec.split(/,(?!,|$)/)
 
 function parseStroke(token: string): Stroke | undefined {
   const stroke: Stroke = { name: "", ctrl: false, shift: false, meta: false, super: false }
@@ -51,7 +53,7 @@ export function matchStroke(stroke: Stroke, key: Pick<KeyEvent, "name" | "ctrl" 
 const display: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→", pageup: "pgup", pagedown: "pgdn", delete: "del", meta: "alt" }
 
 export function formatBinding(spec: string | undefined, leader = "ctrl+x") {
-  const first = spec?.split(",")[0]?.trim()
+  const first = spec && alternatives(spec)[0]?.trim()
   if (!first || first === "none") return undefined
   return first
     .replaceAll("<leader>", `${leader} `)

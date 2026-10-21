@@ -27,6 +27,7 @@ import { PermissionPrompt, Spinner, SplitBorder, Transcript, type TranscriptRef 
 import { DialogSettings } from "./settings"
 import { Sidebar, sidebarFeatures } from "./sidebar"
 import { agentId, current, draft, navigate, notify, prefs, rememberDraft, setDraft, setPref, showError, subagent, toast } from "./state"
+import { registerTabs, TabBar } from "./tabs"
 import { applyTheme, theme } from "./theme"
 import { listThemes, loadTheme } from "./themes"
 import { collapseForkContext, dayCategory, truncateLine } from "./timeline"
@@ -126,6 +127,7 @@ export function App(props: { initialAgentId?: string }) {
   registerCommands(builtins)
   registerTerminalCommands()
   registerPromptCommands(() => prompt)
+  registerTabs()
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -846,6 +848,7 @@ export function App(props: { initialAgentId?: string }) {
         }
       >
         <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={padding()} paddingRight={padding()}>
+          <TabBar />
           <Slot name="session_header" agent={current()} />
           <box flexGrow={1} minHeight={0} position="relative">
             <scrollbox
