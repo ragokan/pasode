@@ -22,6 +22,8 @@ export type Draft = {
   worktree?: { branch?: string }
   /** Transient: directory for the next session ("New session location: active session"); launch directory otherwise. */
   cwd?: string
+  /** Transient: an agent profile picked at home; its mode and features start the next session (not in Plan) while the provider matches. */
+  profile?: { name: string; provider: string; config: { modeId?: string; featureValues?: Record<string, unknown> } }
   /** Transient: a fork's chat-history attachment, source title and directory. */
   fork?: { title: string; cwd: string; attachment: Attachment }
 }
@@ -84,7 +86,7 @@ export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
 
 export function rememberDraft(value: Draft) {
   setDraft(value)
-  const { worktree, fork, agent, cwd, ...lasting } = value
+  const { worktree, fork, agent, cwd, profile, ...lasting } = value
   kvSet("draft", lasting)
 }
 

@@ -14,6 +14,7 @@ import { dialog, DialogHost, dialogs, DialogSelect, type SelectOption } from "./
 import { footerLayout, liveLabel, usageItems } from "./footer"
 import { createKeymap } from "./keys"
 import { Logo } from "./logo"
+import { configSummary, registerManageCommands, statusDialog } from "./manage"
 import { claudeConfigFile, codexConfigFile, listMcpServers, mcpCounts, mcpHealth, setMcpEnabled, type McpHealth } from "./mcp"
 import { active, agents, api, daemon, findModel, loadOlder, mcpRevision, modelLabel, PROVIDERS, providerName, sessionTitle, setMcpRevision, timeline, waiting, type PaseoAgent } from "./paseo"
 import { loadedPlugins, loadPlugins, Slot } from "./plugin"
@@ -128,6 +129,7 @@ export function App(props: { initialAgentId?: string }) {
   registerTerminalCommands()
   registerPromptCommands(() => prompt)
   registerTabs()
+  registerManageCommands()
   const keymap = createKeymap(commandBindings)
 
   function newSession() {
@@ -178,24 +180,27 @@ export function App(props: { initialAgentId?: string }) {
 
   async function openStatus() {
     const info = daemon.getLastServerInfoMessage()
-    const [snapshot, status] = await Promise.all([api.providers.snapshot().catch(() => undefined), daemon.getDaemonStatus().catch(() => undefined)])
+    const [snapshot, status, daemonConfig] = await Promise.all([
+      api.providers.snapshot().catch(() => undefined),
+      daemon.getDaemonStatus().catch(() => undefined),
+      api.config.get().then((result) => result.config, () => undefined),
+    ])
     const providers = (snapshot?.entries ?? [])
       .filter((entry) => PROVIDERS.includes(entry.provider as (typeof PROVIDERS)[number]))
       .map((entry) => `  ${entry.provider}: ${entry.status}${entry.error ? ` (${entry.error})` : ""}`)
     const plugins = loadedPlugins.map((plugin) => `  ${plugin.id}${plugin.error ? ` ✕ ${plugin.error}` : ""}`)
     const rtt = daemon.getLastLivenessRttMs()
-    await dialogs.alert(
-      "Status",
+    await statusDialog(
       [
         `Daemon     ${info?.hostname ?? "?"} · Paseo ${status?.version ?? info?.version ?? "?"} · ${daemon.getConnectionState().status}${rtt ? ` · ${rtt}ms` : ""}`,
         `Listen     ${status?.listen ?? "?"} · pid ${status?.pid ?? "?"}${status?.relay?.enabled ? ` · relay ${status.relay.endpoint}` : " · relay off"}`,
+        `Daemon cfg ${configSummary(daemonConfig)}`,
         `Config     ${tilde(configPath)}`,
         `Theme      ${prefs.theme} (${prefs.themeMode})`,
         `Providers\n${providers.join("\n") || "  —"}`,
         `Plugins\n${plugins.join("\n") || "  none"}`,
         `MCP config claude ${tilde(claudeConfigFile())} · codex ${tilde(codexConfigFile())}`,
       ].join("\n"),
-      "large",
     )
   }
 

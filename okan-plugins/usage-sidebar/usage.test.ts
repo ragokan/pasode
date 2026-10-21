@@ -1,7 +1,8 @@
 // Provenance: ~/coding/ocode/plugins/usage-sidebar/usage.test.ts formatting cases; Paseo fixtures authored for pasode.
 import { expect, test } from "bun:test"
 import type { PaseoProviderUsageResult } from "@getpaseo/client"
-import { formatReset, usageWindows, zeroSubAccounts, type ZeroSubState } from "./usage"
+import type { UsageReportEntry } from "@getpaseo/protocol/messages"
+import { formatReset, reportAccounts, reportWindows, usageWindows, zeroSubAccounts, type ZeroSubState } from "./usage"
 
 const now = Date.UTC(2026, 9, 9)
 const provider = (windows: PaseoProviderUsageResult["providers"][number]["windows"]): PaseoProviderUsageResult["providers"][number] => ({
@@ -62,4 +63,31 @@ test("ZeroSub accounts reuse the window format and mark the account the session 
     { id: "codex-main", family: "codex", label: "okan", current: false, windows: [{ countdown: "3d22h", percent: "40%" }] },
   ])
   expect(zeroSubAccounts(state, undefined, now).some((account) => account.current)).toBe(false)
+})
+
+const windows = [{ id: "5h", label: "5h", usedPct: 22.4, resetsAt: new Date(now + (2 * 60 + 13) * 60_000).toISOString() }]
+const entry = (report: UsageReportEntry["report"], extra: Partial<UsageReportEntry> = {}): UsageReportEntry => ({
+  id: "claude:a", sourceId: "claude", sourceLabel: "Claude", account: { label: "okan" }, fetchedAt: new Date(now).toISOString(), report, ...extra,
+})
+
+test("a usage report shows its live windows", () => {
+  expect(reportWindows(entry({ status: "available", windows }), now)).toEqual([{ countdown: "2h13m", percent: "22%" }])
+  expect(reportWindows(undefined, now)).toEqual([])
+})
+
+test("a failing poll shows the daemon's last successful windows, marked stale; with none it shows nothing", () => {
+  const failed = { status: "error", error: "HTTP 429" } as const
+  const retained = { fetchedAt: new Date(now - 60_000).toISOString(), report: { status: "available", windows } as const }
+  expect(reportWindows(entry(failed, { lastSuccessful: retained }), now)).toEqual([{ countdown: "2h13m", percent: "22%", stale: true }])
+  expect(reportWindows(entry(failed), now)).toEqual([])
+  // Live readings win over an older snapshot.
+  expect(reportWindows(entry({ status: "available", windows: [{ ...windows[0]!, usedPct: 50 }] }, { lastSuccessful: retained }), now)).toEqual([{ countdown: "2h13m", percent: "50%" }])
+})
+
+test("several accounts of one source list by account label", () => {
+  const second = entry({ status: "available", windows }, { id: "claude:b", account: {} })
+  expect(reportAccounts([entry({ status: "available", windows }), second], now)).toEqual([
+    { id: "claude:a", label: "okan", current: false, windows: [{ countdown: "2h13m", percent: "22%" }] },
+    { id: "claude:b", label: "Claude", current: false, windows: [{ countdown: "2h13m", percent: "22%" }] },
+  ])
 })

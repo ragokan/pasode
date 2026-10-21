@@ -1,7 +1,11 @@
 // Provenance: ~/coding/ocode/plugins/usage-sidebar/usage.ts countdown/percent formatting; Paseo supplies readings.
 import type { PaseoProviderUsageResult } from "@getpaseo/client"
+import type { UsageReportEntry } from "@getpaseo/protocol/messages"
 
 type ProviderUsage = PaseoProviderUsageResult["providers"][number]
+/** What a window list is read from: a provider's usage, or a usage report's content. */
+type Reading = Pick<ProviderUsage, "status" | "windows"> | UsageReportEntry["report"]
+export type Window = { countdown: string; percent: string; stale?: boolean }
 
 /** The part of ZeroSub's `zerosub.state` reply (Paseo plugin @kapybara/zerosub) this plugin reads. */
 export type ZeroSubState = {
@@ -16,8 +20,21 @@ export function formatReset(ms: number) {
     : `${Math.floor(minutes / 60)}h${minutes % 60}m`
 }
 
-export function usageWindows(provider: ProviderUsage | undefined, now = Date.now()) {
-  return provider?.status === "available" ? formatWindows(provider.windows, now) : []
+export function usageWindows(reading: Reading | undefined, now = Date.now()) {
+  return reading?.status === "available" ? formatWindows(reading.windows, now) : []
+}
+
+/** The latest poll's windows; while it fails, the daemon's last successful ones, marked stale. */
+export function reportWindows(entry: UsageReportEntry | undefined, now = Date.now()): Window[] {
+  if (!entry) return []
+  const live = usageWindows(entry.report, now)
+  if (live.length || entry.report.status === "available") return live
+  return usageWindows(entry.lastSuccessful?.report, now).map((window) => ({ ...window, stale: true }))
+}
+
+/** One source's accounts (e.g. two Claude logins) in the same shape as ZeroSub's. */
+export function reportAccounts(entries: UsageReportEntry[], now = Date.now()) {
+  return entries.map((entry) => ({ id: entry.id, label: entry.account.label ?? entry.sourceLabel, current: false, windows: reportWindows(entry, now) }))
 }
 
 /** ZeroSub accounts with the same window format; `current` is the account the agent runs on. */
@@ -32,7 +49,7 @@ export function zeroSubAccounts(state: ZeroSubState, agentId: string | undefined
   }))
 }
 
-function formatWindows(windows: ProviderUsage["windows"], now: number) {
+function formatWindows(windows: ProviderUsage["windows"], now: number): Window[] {
   return windows.flatMap((window) => {
     if (/\bfable\b/i.test(window.label)) return []
     const used = window.usedPct ?? (window.remainingPct == null ? undefined : 100 - window.remainingPct)

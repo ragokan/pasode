@@ -1,5 +1,6 @@
 import { createPaseoApi, type PaseoAgent, type PaseoAgentStream, type PaseoProviderUsageResult, type PaseoWorkspace } from "@getpaseo/client"
-import { DaemonClient } from "@getpaseo/client/internal/daemon-client"
+import { DaemonClient, supportsUsageReports } from "@getpaseo/client/internal/daemon-client"
+import type { UsageReportEntry } from "@getpaseo/protocol/messages"
 import { readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -214,12 +215,33 @@ export const modelLabel = (provider: string, id?: string | null) => findModel(pr
 /** OpenCode shows the provider's product name; Paseo's Claude provider is Claude Code. */
 export const providerName = (provider: string) => ({ claude: "Claude Code", codex: "Codex" })[provider] ?? provider
 
-/** Claude/Codex plan windows as the daemon reports them (same data as the Paseo app). */
-export const [usage, setUsage] = createSignal<PaseoProviderUsageResult["providers"]>()
+/** One entry per provider account, as the daemon reports them (same data as the Paseo app); a failed poll keeps `lastSuccessful`. */
+export const [usage, setUsage] = createSignal<UsageReportEntry[]>()
+
+/** Hosts without usage reports only have the per-provider list; present it as entries. */
+export function legacyReport(provider: PaseoProviderUsageResult["providers"][number]): UsageReportEntry {
+  return {
+    id: provider.providerId,
+    sourceId: provider.providerId,
+    sourceLabel: provider.displayName,
+    account: {},
+    fetchedAt: provider.fetchedAt ?? new Date().toISOString(),
+    report:
+      provider.status === "available"
+        ? { status: "available", windows: provider.windows, planLabel: provider.planLabel ?? undefined }
+        : { status: "error", error: provider.error ?? "" },
+  }
+}
 
 export async function refreshUsage() {
+  // A failed refresh leaves the last reports in place.
+  if (supportsUsageReports(daemon.getLastServerInfoMessage()?.features)) {
+    const result = await daemon.listUsageReports().catch(() => undefined)
+    if (result) setUsage(result.reports)
+    return
+  }
   const result = await api.providers.listUsage().catch(() => undefined)
-  if (result) setUsage(result.providers)
+  if (result) setUsage(result.providers.map(legacyReport))
 }
 
 let closeTimeline: (() => void) | undefined
