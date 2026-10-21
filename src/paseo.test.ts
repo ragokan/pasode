@@ -1,6 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test"
-import { createRoot, createEffect } from "solid-js"
-import { agents, api, daemon, loadOlder, openSubagentTimeline, openTimeline, sessionTitle, setAgents, setWorkspaceTitles, timeline, waiting, type PaseoAgent } from "./paseo"
+import { createRoot, createEffect, createMemo } from "solid-js"
+import { agents, api, daemon, loadOlder, openSubagentTimeline, openTimeline, sessionTitle, setAgents, setWorkspaceTitles, timeline, waiting, type Mark, type PaseoAgent } from "./paseo"
+import { turnFooters } from "./render/turns"
+import { computeMetrics } from "./sidebar/metrics/metrics"
 
 const agent = (id: string, workspaceId: string, title: string) => ({ id, workspaceId, title }) as PaseoAgent
 
@@ -67,6 +69,53 @@ const page = (texts: string[], older = false, seq = texts.length) => ({
 })
 const texts = () => timeline.rows.map((row) => (row as { text: string }).text)
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+test("streamed deltas coalesce into one timing mark per message; footers and metrics are unchanged and no longer recompute per delta", async () => {
+  const { calls, send } = fakeTimeline()
+  const opening = openTimeline("a")
+  await tick()
+  const start = Date.parse("2026-10-20T10:00:00Z")
+  calls[0]!.resolve({ entries: [{ item: { type: "user_message", text: "Go" }, timestamp: new Date(start).toISOString() }], hasOlder: false, startCursor: null, endCursor: { seq: 1 } })
+  await opening
+
+  const footerRuns = { footers: 0, metrics: 0 }
+  createRoot(() => {
+    createMemo(() => (footerRuns.footers++, turnFooters(timeline.rows, timeline.times, timeline.marks, false)))
+    createMemo(() => (footerRuns.metrics++, computeMetrics(timeline.marks)))
+  })
+  // What the pre-coalescing code recorded: one mark per streamed delta.
+  const full: Mark[] = [{ kind: "item", type: "user_message", at: start }]
+  let seq = 1
+  let at = start
+  const live = (item: { type: string; callId?: string; [field: string]: unknown }, status?: string) => {
+    at += 10
+    send({ event: { type: "timeline", item: { ...item, status } }, seq: ++seq, timestamp: new Date(at).toISOString() })
+    full.push(item.type === "tool_call" ? { kind: "item", type: item.type, at, callId: item.callId, status } : { kind: "item", type: item.type, at })
+  }
+  const lifecycle = (event: { type: string; usage?: { outputTokens: number } }) => {
+    at += 10
+    send({ event, timestamp: new Date(at).toISOString() })
+    full.push(event.type === "turn_started" ? { kind: "turn_started", at } : { kind: "turn_completed", at, outputTokens: event.usage?.outputTokens })
+  }
+  const DELTAS = 1000
+  const tool = { type: "tool_call", name: "Bash", callId: "t", error: null, detail: { type: "shell", command: "ls" } }
+  lifecycle({ type: "turn_started" })
+  for (let i = 0; i < DELTAS; i++) live({ type: "reasoning", text: "r" })
+  live(tool, "running")
+  live(tool, "completed")
+  for (let i = 0; i < DELTAS; i++) live({ type: "assistant_message", text: "a", messageId: "m" })
+  lifecycle({ type: "turn_completed", usage: { outputTokens: 500 } })
+
+  expect(timeline.rows.map((row) => row.type)).toEqual(["user_message", "reasoning", "tool_call", "assistant_message"])
+  expect(timeline.marks.length).toBeLessThan(10) // not 2000+
+  expect(footerRuns.footers).toBeLessThan(10)
+  expect(footerRuns.metrics).toBeLessThan(10)
+  const footers = turnFooters(timeline.rows, timeline.times, timeline.marks, false)
+  expect(footers.get(3)?.tps).toBeGreaterThan(0)
+  expect(footers).toEqual(turnFooters(timeline.rows, timeline.times, full, false))
+  expect(computeMetrics(timeline.marks).tps).toBeGreaterThan(0)
+  expect(computeMetrics(timeline.marks)).toEqual(computeMetrics(full))
+})
 
 test("loadOlder shares one request: holding PageUp prepends the page once", async () => {
   const { calls } = fakeTimeline()

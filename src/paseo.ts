@@ -237,6 +237,9 @@ export async function openTimeline(agentId: string | undefined) {
         const before = draft.rows.length
         applyTimelineItem(draft.rows, event.item)
         if (draft.rows.length > before) draft.times.push(at)
+        // A delta merged into the last message adds nothing the mark readers use (first output, user and tool marks);
+        // one mark per delta made every footer/metrics rescan grow with the stream.
+        else if (event.item.type === "assistant_message" || event.item.type === "reasoning") return
         draft.marks.push(itemMark(event.item, at))
       }),
     )
