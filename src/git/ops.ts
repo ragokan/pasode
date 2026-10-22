@@ -58,7 +58,7 @@ export async function createPr(cwd: string) {
  * The merge request carries only the directory and method, so the daemon merges whichever PR the branch has when
  * it arrives (it has no way to be told which). Re-read it just before sending and stop if it isn't the one confirmed.
  */
-async function stillPr(cwd: string, pr: Pr) {
+async function stillPr(cwd: string, pr: PrRef) {
   await daemon.checkoutRefresh(cwd).catch(() => {})
   const fresh = await daemon.checkoutPrStatus(cwd).catch(showError)
   if (!fresh) return false
@@ -67,7 +67,12 @@ async function stillPr(cwd: string, pr: Pr) {
   return false
 }
 
-export async function mergePr(cwd: string, pr: Pr, methods: string[]) {
+type PrRef = { number?: number; url: string; title: string; baseRefName: string }
+
+export async function mergePr(cwd: string, live: Pr, methods: string[]) {
+  // Plain values from here on: `live` is the live store's object, which a status update rewrites in place
+  // (into another PR) while a dialog waits, so identity checks against it would compare a PR with itself.
+  const pr: PrRef = { number: live.number, url: live.url, title: live.title, baseRefName: live.baseRefName }
   const method = methods.length === 1 ? methods[0] : await dialogs.select({ title: "Merge method", options: methods.map((value) => ({ title: value, value })) })
   if (!method) return
   if (!(await dialogs.confirm("Merge pull request", `Merge #${pr.number ?? ""} "${pr.title}" into ${pr.baseRefName} (${method})?`, "Merge"))) return
