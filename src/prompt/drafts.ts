@@ -16,3 +16,11 @@ export function takeDraft(id: string | undefined) {
   drafts.delete(id)
   return draft
 }
+
+// The input now showing each session, so a failed send can come back to it even when a different Prompt instance
+// than the one that sent it shows the session by then (home → session remounts the prompt).
+const showing = new Map<string | undefined, (failed: PromptSnapshot) => void>()
+
+export const showSession = (id: string | undefined, receive: (failed: PromptSnapshot) => void) => showing.set(id, receive)
+export const hideSession = (id: string | undefined, receive: (failed: PromptSnapshot) => void) => showing.get(id) === receive && showing.delete(id)
+export const showingSession = (id: string | undefined) => showing.get(id)
