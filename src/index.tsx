@@ -1,27 +1,33 @@
 import pkg from "../package.json"
+import { parseArgs } from "./args"
 import { startLocalDaemon } from "./local-daemon"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
 
-const usage = `paseo-tui [-s] [agent-id]
-paseo-tui -v | --version
-paseo-tui update         install the latest release over this binary
+const usage = `pasode [-s | --session] [agent-id]   open the TUI (agent-id: a Paseo agent ID or its \`paseo ls\` prefix)
+pasode update                        install the latest release over this binary
+pasode -v | --version                print the version
+pasode -h | --help                   print this help
 
 OpenCode-style terminal client for a running Paseo daemon.
 New sessions start in the current directory.
 
 env: PASEO_URL (default ws://127.0.0.1:6767/ws), PASEO_PASSWORD`
 
-// `pasode -s <id>` like `opencode -s`; a bare id (or `paseo ls` prefix) works too.
-const arg = ["-s", "--session"].includes(process.argv[2] ?? "") ? process.argv[3] : process.argv[2]
-if (arg === "-h" || arg === "--help") {
+// `pasode -s <id>` like `opencode -s`; a bare id (or `paseo ls` prefix) works too. Anything else is a usage error.
+const cli = parseArgs(process.argv.slice(2))
+if (cli.run === "usage") {
+  console.error(usage)
+  process.exit(1)
+}
+if (cli.run === "help") {
   console.log(usage)
   process.exit(0)
 }
-if (arg === "-v" || arg === "--version") {
+if (cli.run === "version") {
   console.log(pkg.version)
   process.exit(0)
 }
-if (process.argv[2] === "update") {
+if (cli.run === "update") {
   const { updateCommand } = await import("./update")
   try {
     console.log(await updateCommand())
@@ -31,6 +37,7 @@ if (process.argv[2] === "update") {
     process.exit(1)
   }
 }
+const arg = cli.run === "tui" ? cli.session : undefined
 
 // Connect while the app's modules load (they take longer than the handshake), and apply the theme before the first frame.
 // Loading starts one loop turn after connect() does: it is ~0.7 s of synchronous work, and the socket must open first.

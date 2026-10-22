@@ -20,7 +20,10 @@ into `~/.local/bin/pasode` (a running pasode keeps its file), warning if that di
 pasode mentions newer releases when it opens; `/update` installs one and restarts into the same session. From the shell,
 `pasode update` does the same without opening the TUI: it prints `pasode 0.3.0 -> 0.4.0` or `pasode 0.3.0 is up to date`,
 and exits non-zero if it can't update (GitHub unreachable, checksum mismatch, or a source checkout). `pasode --version`
-(or `-v`) prints just the version.
+(or `-v`) prints just the version. Any other argument than these, `-h`, or a session ID prints the usage and exits 1.
+
+**Coming from 0.3.0 or older:** those versions don't have `pasode update` (they take `update` as a session ID and open
+the TUI), so update them once with the `install.sh` line above; 0.4.0 and newer update with `pasode update`.
 
 Or run from source:
 

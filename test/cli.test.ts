@@ -41,3 +41,23 @@ test("update in a source checkout fails with one line on stderr, without the TUI
     server.stop(true)
   }
 })
+
+for (const args of [["updte"], ["upgrade"], ["--foo"], ["-s"], ["update", "now"]])
+  test(`${args.join(" ")} is a usage error on stderr with exit 1, before the daemon or the TUI`, async () => {
+    let attempts = 0
+    const server = Bun.serve({ port: 0, fetch: () => (attempts++, new Response("no")) })
+    try {
+      const child = Bun.spawn([process.execPath, bin, ...args], {
+        env: { ...process.env, PASEO_URL: `ws://127.0.0.1:${server.port}/ws` },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: 10_000,
+      })
+      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      expect({ stdout, code, attempts }).toEqual({ stdout: "", code: 1, attempts: 0 })
+      expect(stderr).toStartWith("pasode [-s | --session] [agent-id]")
+    } finally {
+      server.stop(true)
+    }
+  })
