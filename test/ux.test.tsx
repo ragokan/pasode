@@ -6,12 +6,14 @@ import { App } from "../src/app"
 import { runCommand } from "../src/commands"
 import { daemon, setAgents, setTimeline, type PaseoAgent } from "../src/paseo"
 import { setLoadedPlugins } from "../src/plugin"
+import { ACK_MS, HEARTBEAT_MS } from "../src/presence"
 import { rendererOptions } from "../src/renderer"
 import { TimelineRow } from "../src/session"
 import { prefs, setAgentId, setPref, setToast, toast } from "../src/state"
 import { installUx } from "../src/ux"
 
 type Handler = Parameters<typeof daemon.onAgentAttentionRequired>[0]
+type Beat = Parameters<typeof daemon.sendHeartbeat>[0]
 
 const [focused, setFocused] = createSignal(false)
 let cleanup: (() => void) | undefined
@@ -41,6 +43,18 @@ async function mount() {
   spy(daemon, "observeEvents", (() => ({ ready: Promise.resolve(), release: async () => {} })) as never)
   spy(daemon, "onAgentAttentionRequired", ((fn: Handler) => ((handler = fn), () => {})) as never)
   spy(Bun, "spawn", (() => { throw new Error("ENOENT") }) as never)
+  // The daemon's presence channel, a clock to age it, and the two timers presence uses, captured to fire by hand.
+  const beats: Beat[] = []
+  spy(daemon, "sendHeartbeat", ((beat: Beat) => void beats.push(beat)) as never)
+  const clock = { offset: 0 }
+  const realNow = Date.now.bind(Date)
+  spy(Date, "now", (() => realNow() + clock.offset) as never)
+  const intervals: (() => void)[] = []
+  const timeouts: (() => void)[] = []
+  const realSetInterval = globalThis.setInterval
+  const realSetTimeout = globalThis.setTimeout
+  spy(globalThis, "setInterval", ((fn: () => void, ms?: number, ...rest: never[]) => (ms === HEARTBEAT_MS ? (intervals.push(fn), 0) : realSetInterval(fn, ms, ...rest))) as never)
+  spy(globalThis, "setTimeout", ((fn: () => void, ms?: number, ...rest: never[]) => (ms === ACK_MS ? (timeouts.push(fn), 0) : realSetTimeout(fn, ms, ...rest))) as never)
   let renderer!: CliRenderer
   const titles: string[] = []
   const notified: [string, string | undefined][] = []
@@ -56,13 +70,13 @@ async function mount() {
   }
   const screen = await testRender(() => <Host />, { ...rendererOptions, width: 40, height: 10 })
   cleanup = () => screen.renderer.destroy()
-  const attention = (agentId: string, reason: "finished" | "error" | "permission", body = "Done") =>
-    handler!({ agentId, reason, timestamp: "", shouldNotify: false, notification: { title: "Agent finished", body, data: {} } } as never)
+  const attention = (agentId: string, reason: "finished" | "error" | "permission", body = "Done", shouldNotify = true) =>
+    handler!({ agentId, reason, timestamp: "", shouldNotify, notification: { title: "Agent finished", body, data: {} } } as never)
   const agent = (id: string, title: string) => setAgents(id, { id, title, provider: "claude", cwd: "/tmp", status: "idle", updatedAt: "" } as PaseoAgent)
-  return { renderer, screen, titles, notified, copied, attention, agent }
+  return { renderer, screen, titles, notified, copied, attention, agent, beats, clock, intervals, timeouts }
 }
 
-test("background notification: a watched session finishing, failing or asking raises a desktop notification; focus or the pref silences it", async () => {
+test("a notification routed here is a desktop notification in the background and a toast in front; the pref silences both", async () => {
   const ux = await mount()
   ux.agent("n1", "Fix parser")
   ux.agent("n2", "Other session")
@@ -72,22 +86,22 @@ test("background notification: a watched session finishing, failing or asking ra
   ux.attention("n1", "finished", "Parser fixed.")
   ux.attention("n1", "error", "Encountered an error.")
   ux.attention("n1", "permission", "Run the tests?")
-  expect(ux.notified).toEqual([["Parser fixed.", "✓ Fix parser"], ["Encountered an error.", "✕ Fix parser"], ["Run the tests?", "△ Fix parser"]])
+  ux.attention("n2", "finished", "Other done.") // never opened here, but the daemon picked this client, so nobody else will say it
+  expect(ux.notified).toEqual([["Parser fixed.", "✓ Fix parser"], ["Encountered an error.", "✕ Fix parser"], ["Run the tests?", "△ Fix parser"], ["Other done.", "✓ Other session"]])
 
   ux.notified.length = 0
-  ux.attention("n2", "finished") // never opened here: the Paseo app and phone cover it
   setFocused(true)
-  ux.attention("n1", "finished") // the terminal is in front: the screen already shows it
+  setToast(undefined)
+  ux.attention("n1", "finished", "All done.") // in front: a toast, not a desktop notification
+  expect(ux.notified).toEqual([])
+  expect(toast()).toMatchObject({ title: "✓ Fix parser", message: "All done.", variant: "success" })
   setFocused(false)
+
   setPref("notifications", false)
+  setToast(undefined)
   ux.attention("n1", "finished")
   expect(ux.notified).toEqual([])
-
-  setPref("notifications", true)
-  setAgentId("n2") // opening a session starts watching it, and the first one stays watched
-  ux.attention("n1", "finished")
-  ux.attention("n2", "finished")
-  expect(ux.notified).toHaveLength(2)
+  expect(toast()).toBeUndefined()
 })
 
 test("inside Warp or Kaku with the warp plugin loaded, its notifications are the only ones", async () => {
@@ -235,4 +249,107 @@ test("the diff wrap pref decides whether a long diff line wraps or is cut", asyn
   expect(diff().wrapMode).toBe("none")
   expect(screen.captureCharFrame()).not.toContain("TAIL")
   setPref("diffWrap", "word")
+})
+
+test("the daemon's routing decides: another client was picked, or someone is watching the session, so this one stays quiet", async () => {
+  const ux = await mount()
+  ux.agent("r1", "Fix parser")
+  setAgentId("r1")
+  setToast(undefined)
+  ux.attention("r1", "finished", "Done", false) // just launched, so counted as present: shouldNotify false is a real "not you"
+  expect(ux.notified).toEqual([])
+  expect(toast()).toBeUndefined()
+  expect(ux.timeouts).toHaveLength(0)
+  ux.attention("r1", "finished", "Done", true)
+  expect(ux.notified).toHaveLength(1)
+})
+
+test("a client idle past the daemon's presence window was never counted, so it alerts for sessions opened here that nobody acknowledges", async () => {
+  const ux = await mount()
+  ux.agent("l1", "Opened here")
+  ux.agent("l2", "Never opened")
+  setAgentId("l1")
+  ux.clock.offset = 151_000 // the daemon's window is 180 s; ours is shorter on purpose
+
+  ux.attention("l2", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(0) // not ours to alert on
+
+  ux.attention("l1", "finished", "Done", false)
+  expect(ux.notified).toEqual([]) // not at once: someone viewing it elsewhere acknowledges it first
+  expect(ux.timeouts).toHaveLength(1)
+  setAgents("l1", "requiresAttention", false)
+  ux.timeouts.pop()!()
+  expect(ux.notified).toEqual([]) // acknowledged in another client
+
+  setAgents("l1", "requiresAttention", true)
+  ux.attention("l1", "finished", "Done", false)
+  ux.timeouts.pop()!()
+  expect(ux.notified).toEqual([["Done", "✓ Opened here"]]) // nobody did
+
+  setAgents("l1", "requiresAttention", true)
+  ux.attention("l1", "finished", "Done", false)
+  setFocused(true)
+  ux.timeouts.pop()!()
+  expect(ux.notified).toHaveLength(1) // looking at the terminal by then
+  setFocused(false)
+
+  ux.screen.mockInput.pressKey("a") // typing makes it present again, and the daemon's answer counts
+  ux.attention("l1", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(0)
+})
+
+test("presence: real focus, the open session and last input are reported the way the Paseo app does, and never fake activity", async () => {
+  setFocused(true)
+  const ux = await mount()
+  const last = () => ux.beats.at(-1)!
+  expect(last()).toMatchObject({ deviceType: "web", focusedAgentId: null, appVisible: true })
+  const launched = last().lastActivityAt
+
+  ux.agent("h1", "Fix parser")
+  ux.clock.offset = 20_000
+  setAgentId("h1")
+  expect(last()).toMatchObject({ focusedAgentId: "h1", appVisible: true })
+  expect(last().lastActivityAt > launched).toBe(true) // opening a session is activity
+  const opened = last().lastActivityAt
+
+  ux.clock.offset = 40_000
+  setFocused(false)
+  expect(last()).toMatchObject({ focusedAgentId: "h1", appVisible: false, lastActivityAt: opened }) // leaving isn't activity
+  ux.clock.offset = 90_000
+  ux.intervals[0]!() // the periodic beat reports the same idle time: a heartbeat isn't activity
+  expect(last()).toMatchObject({ appVisible: false, lastActivityAt: opened })
+
+  setFocused(true)
+  expect(last().appVisible).toBe(true)
+  expect(last().lastActivityAt > opened).toBe(true) // coming back is
+  ux.clock.offset = 100_000
+  ux.screen.mockInput.pressKey("a")
+  ux.intervals[0]!()
+  expect(last().lastActivityAt > launched && new Date(last().lastActivityAt).getTime() >= Date.now()).toBe(true)
+
+  ux.renderer.destroy() // exiting leaves a "not here" behind (the daemon also drops us when the socket closes)
+  expect(last().appVisible).toBe(false)
+})
+
+test("a heartbeat that can't be sent (daemon not connected) is dropped, not thrown", async () => {
+  const ux = await mount()
+  spy(daemon, "sendHeartbeat", (() => { throw new Error("Transport not connected") }) as never)
+  expect(() => ux.intervals[0]!()).not.toThrow()
+})
+
+test("where the warp plugin owns presence (Kaku), pasode sends none; one connection never carries two senders", async () => {
+  process.env.TERM_PROGRAM = "Kaku"
+  setLoadedPlugins([{ id: "warp", spec: "okan-plugins" }])
+  const ux = await mount()
+  setAgentId("k1")
+  setFocused(true)
+  setFocused(false)
+  expect(ux.beats).toEqual([])
+  expect(ux.intervals).toHaveLength(0)
+  ux.attention("k1", "finished", "Done", true)
+  expect(ux.notified).toEqual([]) // its notifications are the plugin's too
+
+  setLoadedPlugins([]) // the plugin failed to load: pasode takes over
+  expect(ux.beats.length).toBeGreaterThan(0)
+  expect(ux.intervals).toHaveLength(1)
 })
