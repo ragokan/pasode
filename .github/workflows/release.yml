@@ -1,0 +1,111 @@
+name: release
+
+# Pushing a v* tag tests, builds and publishes that release; /update, `pasode update` and install.sh read its assets.
+# Run it by hand (Actions → release → Run workflow) for a dry run that builds and checks the binaries without publishing.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - name: Tag matches package.json
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(bun -p 'require("./package.json").version')
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "::error::tag $GITHUB_REF_NAME doesn't match package.json version $version"; exit 1; }
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            targets: bun-linux-arm64 bun-linux-x64
+          # Cross-compiled darwin-x64 keeps Bun's own (no longer valid) signature, so the Mac binaries are built on a Mac.
+          - runner: macos-latest
+            targets: bun-darwin-arm64 bun-darwin-x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - run: bun install --frozen-lockfile --os='*' --cpu='*'
+      - run: bun run build ${{ matrix.targets }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ runner.os }}
+          path: |
+            dist/*.gz
+            dist/SHA256SUMS
+
+  # Every binary must start on its own platform before anything is published; on macOS its signature must verify too.
+  verify:
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, artifact: dist-Linux, asset: pasode-linux-x64 }
+          - { runner: ubuntu-24.04-arm, artifact: dist-Linux, asset: pasode-linux-arm64 }
+          - { runner: macos-latest, artifact: dist-macOS, asset: pasode-darwin-arm64 }
+          - { runner: macos-15-intel, artifact: dist-macOS, asset: pasode-darwin-x64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist
+      - run: gunzip -c dist/${{ matrix.asset }}.gz > pasode && chmod +x pasode
+      - if: runner.os == 'macOS'
+        run: codesign --verify --strict --verbose=2 pasode && codesign --display --verbose=2 pasode
+      - run: |
+          version=$(./pasode --version)
+          expected=$(node -p 'require("./package.json").version')
+          echo "${{ matrix.asset }} --version: $version"
+          [ "$version" = "$expected" ] || { echo "::error::${{ matrix.asset }} printed '$version', expected $expected"; exit 1; }
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: artifacts
+      - name: Assemble the assets
+        run: |
+          mkdir release
+          cp artifacts/*/*.gz release/
+          sort -k2 artifacts/*/SHA256SUMS > release/SHA256SUMS
+          cd release && sha256sum -c SHA256SUMS && ls -l
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          # An annotated tag's message becomes the notes; a lightweight tag gets GitHub's generated notes.
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = tag ]; then
+            git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+            set -- --notes-file notes.md
+          else
+            set -- --generate-notes
+          fi
+          gh release create "$GITHUB_REF_NAME" release/*.gz release/SHA256SUMS --verify-tag --latest --title "pasode ${GITHUB_REF_NAME#v}" "$@"

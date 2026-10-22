@@ -6,14 +6,21 @@ steer here are the same ones the Paseo desktop and mobile apps show, live. Claud
 Built on OpenTUI + Solid (OpenCode's UI stack) and `@getpaseo/client`; much of the UI is ported from
 OpenCode (MIT). Plugins live in [`custom-plugins/`](custom-plugins).
 
-Install a release binary (macOS or Linux, arm64 or x64). It mentions newer releases when it opens; `/update` installs
-one and restarts into the same session. From the shell, `pasode update` does the same without opening the TUI: it prints
-`pasode 0.3.0 -> 0.4.0` or `pasode 0.3.0 is up to date`, and exits non-zero if it can't update (GitHub unreachable, checksum
-mismatch, or a source checkout).
+Install (macOS or Linux, arm64 or x64; no Bun or source checkout needed):
 
 ```sh
-mkdir -p ~/.local/bin && curl -fL "https://github.com/ragokan/pasode/releases/latest/download/pasode-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/').gz" | gunzip > ~/.local/bin/pasode && chmod +x ~/.local/bin/pasode
+curl -fsSL https://raw.githubusercontent.com/ragokan/pasode/main/install.sh | sh
 ```
+
+It downloads the latest release's binary for this machine, checks it against the release's `SHA256SUMS`, and renames it
+into `~/.local/bin/pasode` (a running pasode keeps its file), warning if that directory isn't on your `PATH`.
+`PASODE_INSTALL_DIR` picks another directory and `PASODE_VERSION=0.4.0` pins a release (pass them to `sh`, e.g.
+`curl -fsSL … | PASODE_INSTALL_DIR=~/bin sh`). Rerunning it updates.
+
+pasode mentions newer releases when it opens; `/update` installs one and restarts into the same session. From the shell,
+`pasode update` does the same without opening the TUI: it prints `pasode 0.3.0 -> 0.4.0` or `pasode 0.3.0 is up to date`,
+and exits non-zero if it can't update (GitHub unreachable, checksum mismatch, or a source checkout). `pasode --version`
+(or `-v`) prints just the version.
 
 Or run from source:
 
@@ -178,10 +185,18 @@ Plugins import `solid-js` / `@opentui/*` normally; the launcher maps them onto t
 
 ## Releasing
 
-Bump `version` in `package.json`, then build every platform's binary and publish them with their checksums:
+Releases are built by GitHub Actions ([`.github/workflows/release.yml`](.github/workflows/release.yml)). Bump `version`
+in `package.json`, commit, then push a matching tag:
 
 ```sh
-bun install --frozen-lockfile --os='*' --cpu='*'
-bun run build bun-darwin-arm64 bun-darwin-x64 bun-linux-arm64 bun-linux-x64
-gh release create v$(bun -p 'require("./package.json").version') dist/*.gz dist/SHA256SUMS
+git commit -am "chore(release): v0.4.0"
+git tag -a v0.4.0 -m "What changed"   # the tag message becomes the release notes
+git push origin main v0.4.0
 ```
+
+The workflow fails unless the tag matches `package.json`, runs the typecheck and tests, builds the Linux binaries on Linux
+and the macOS ones on a Mac (so they carry a valid signature for Apple Silicon), starts each binary on its own
+platform (and verifies the macOS signatures), then publishes the release as latest with `pasode-<os>-<arch>.gz` and
+`SHA256SUMS`, the assets `/update`, `pasode update` and `install.sh` read. A lightweight tag gets GitHub's generated notes.
+Run the workflow by hand (Actions → release → Run workflow) for a dry run that builds and checks without publishing.
+`bun run build [targets]` still builds locally into `dist/`.
