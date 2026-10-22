@@ -79,7 +79,8 @@ for (const change of ["replaced", "switched", "switched while prompting", "compl
 const pick = (index: number) => chooseMessage(timeline.rows[index] as never)!
 
 // A session of three prompts; the provider supports rewinding as `capabilities` says.
-const session = (capabilities: Partial<NonNullable<PaseoAgent["capabilities"]>>) => {
+// The redo queue is keyed by session id and lives for the process, so a test that asserts on it takes an id of its own.
+const session = (capabilities: Partial<NonNullable<PaseoAgent["capabilities"]>>, id = "rw") => {
   const rows = [
     { type: "user_message", text: "first", messageId: "m1" },
     { type: "assistant_message", text: "a1" },
@@ -87,15 +88,15 @@ const session = (capabilities: Partial<NonNullable<PaseoAgent["capabilities"]>>)
     { type: "assistant_message", text: "a2" },
     { type: "user_message", text: "third", messageId: "m3" },
   ] as const
-  setAgents("rw", { id: "rw", provider: "claude", cwd: "/tmp", title: "Rewind me", capabilities } as PaseoAgent)
-  setAgentId("rw")
-  setTimeline({ agentId: "rw", rows: [...rows], times: rows.map((_, i) => 1000 + i), marks: [], loading: false, hasOlder: false, startCursor: undefined })
+  setAgents(id, { id, provider: "claude", cwd: "/tmp", title: "Rewind me", capabilities } as PaseoAgent)
+  setAgentId(id)
+  setTimeline({ agentId: id, rows: [...rows], times: rows.map((_, i) => 1000 + i), marks: [], loading: false, hasOlder: false, startCursor: undefined })
 }
 
 test("revert to a middle message rewinds there, restores its text and queues every undone prompt for redo in order", async () => {
-  session({ supportsRewindBoth: true })
+  session({ supportsRewindBoth: true }, "redo")
   const rewound: unknown[][] = []
-  const rewind = spyOn(daemon, "rewindAgent").mockImplementation(async (...args) => (rewound.push(args), { ok: true, error: null, requestId: "r", agentId: "rw" }))
+  const rewind = spyOn(daemon, "rewindAgent").mockImplementation(async (...args) => (rewound.push(args), { ok: true, error: null, requestId: "r", agentId: "redo" }))
   const confirm = spyOn(dialogs, "confirm").mockResolvedValue(true)
   const sent: string[] = []
   const ref = spyOn(api.agents, "ref").mockImplementation(() => ({ send: async (text: string) => void sent.push(text) }) as never)
@@ -103,7 +104,7 @@ test("revert to a middle message rewinds there, restores its text and queues eve
     const restored: string[] = []
     await revertTo(pick(2), (text) => restored.push(text))
     expect(confirm.mock.calls[0]![1]).toBe("Rewind 2 messages and roll back their file edits? Paseo can't restore the replies afterwards.")
-    expect(rewound).toEqual([["rw", "m2", "both"]])
+    expect(rewound).toEqual([["redo", "m2", "both"]])
     expect(restored).toEqual(["second"])
     expect(toast()?.message).toBe("Undid 2 messages and their file changes")
     await redo()

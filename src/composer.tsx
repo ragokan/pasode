@@ -106,6 +106,16 @@ const [tab, setTab] = createSignal<Tab>("subagents")
 const [selected, setSelected] = createSignal(0)
 const [activeOnly, setActiveOnly] = createSignal(true)
 const [armed, setArmed] = createSignal<string>()
+/** The picker closed and its choices (tab, row, finished filter, armed key, provider subagents) as at launch; for tests, which share one process. */
+export function resetComposer() {
+  setOpen(false)
+  setTab("subagents")
+  setSelected(0)
+  setActiveOnly(true)
+  setArmed(undefined)
+  setNative({ parentId: undefined, list: [] })
+}
+
 /** Open, or the terminal pane holds the keyboard: the prompt gives way to either. */
 export const composerOpen = () => open() || paneFocused()
 
