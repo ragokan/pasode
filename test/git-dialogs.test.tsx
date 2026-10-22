@@ -3,6 +3,7 @@ import { testRender } from "@opentui/solid"
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test"
 import { createSession, newWorktreeDraft } from "../src/actions"
 import { dialog, DialogHost, dialogs } from "../src/dialog"
+import { watchStatus } from "../src/git/live"
 import { openPr } from "../src/git/pr"
 import { openWorktrees } from "../src/git/worktrees"
 import { daemon, setAgents, type PaseoAgent } from "../src/paseo"
@@ -31,8 +32,10 @@ const pr = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
+let observers: { snapshot(payload: unknown): void; update(message: unknown): void }[] = []
 beforeEach(() => {
-  const events = { subscriptionId: "e", ready: Promise.resolve({}), subscribe: () => () => {}, release: async () => {} }
+  observers = []
+  const events = { subscriptionId: "e", ready: Promise.resolve({}), subscribe: (observer: (typeof observers)[number]) => (observers.push(observer), () => {}), release: async () => {} }
   spy(spyOn(daemon, "observeEvents").mockImplementation((() => events) as never))
   spy(spyOn(daemon, "getCheckoutStatus").mockImplementation((async () => status) as never))
   spy(spyOn(daemon, "checkoutRefresh").mockImplementation((async () => ({ success: true })) as never))
@@ -96,6 +99,30 @@ for (const [name, replacement] of [["a different PR", () => pr({ number: 8, url:
     expect(toast()).toMatchObject({ variant: "warning", message: "The branch's pull request is no longer #7; nothing was merged" })
   })
 }
+
+test("the confirmed PR is a snapshot: a live update rewriting the store's PR during the confirm can't redirect the merge", async () => {
+  const other = pr({ number: 8, url: "https://github.com/o/r/pull/8", title: "Other thing", headRefName: "other" })
+  let answer: unknown = pr()
+  spy(spyOn(daemon, "checkoutPrStatus").mockImplementation((async () => ({ cwd: "/tmp/g", status: answer, githubFeaturesEnabled: true, error: null })) as never))
+  const merged: unknown[] = []
+  spy(spyOn(daemon, "checkoutPrMerge").mockImplementation((async (_cwd: string, input: unknown) => (merged.push(input), { success: true, error: null })) as never))
+  // The sidebar (or the changes view) keeps watching after the dialog closes, so status updates keep rewriting the store's PR in place.
+  const stopSidebar = watchStatus("/tmp/g")
+  await mount()
+  openPr("/tmp/g")
+  await settle()
+  screen!.mockInput.pressArrow("down")
+  screen!.mockInput.pressEnter()
+  await settle()
+  expect(frame()).toContain('Merge #7 "Add thing" into main (squash)?')
+  answer = other
+  for (const observer of observers) observer.update({ type: "checkout_status_update", payload: { ...status, subscriptionId: "e", prStatus: { cwd: "/tmp/g", status: other, githubFeaturesEnabled: true, error: null } } })
+  screen!.mockInput.pressEnter()
+  await settle()
+  expect(merged).toEqual([])
+  expect(toast()).toMatchObject({ variant: "warning", message: "The branch's pull request is no longer #7; nothing was merged" })
+  stopSidebar()
+})
 
 test("/pr explains why a PR can't merge instead of offering it, and offers Create when there is none", async () => {
   let answer: unknown = { cwd: "/tmp/g", status: pr({ isDraft: true }), githubFeaturesEnabled: true, error: null }
