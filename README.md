@@ -116,9 +116,11 @@ Quitting from a session prints its title and `pasode -s <id>` to continue, like 
 - **View/System**: theme switcher with live preview (`ctrl+x t`), sidebar (`ctrl+b`), help with every keybind id
   (`ctrl+x h`), `/status` (daemon, its config, providers, plugins; `d` provider diagnostics, `r` restart the daemon,
   `u` update it — installs the latest Paseo on the host, then restarts — each behind a confirm). Mouse selections
-  copy when released and `ctrl+c` copies one (OSC 52, then `pbcopy` / `wl-copy` / `xclip` / `xsel`). While the
-  terminal is unfocused, a session you opened finishing, failing or asking for permission raises a desktop
-  notification (terminals with OSC 9/99/777). The terminal title follows the session. `ctrl+z` suspends (`fg`
+  copy when released and `ctrl+c` copies one (OSC 52, then `pbcopy` / `wl-copy` / `xclip` / `xsel`). Like the Paseo
+  app, pasode reports its presence (terminal focus, open session, last input) so the daemon picks one client to
+  alert when a session finishes, fails or asks for permission: picked, pasode shows a desktop notification while the
+  terminal is unfocused (OSC 9/99/777 terminals) or a toast in front; idle past the daemon's window, it still alerts
+  for sessions opened here that nobody acknowledged within 3 s. In Warp/Kaku the warp plugin does this instead. The terminal title follows the session. `ctrl+z` suspends (`fg`
   resumes). Startup connects to the daemon while the UI loads.
 
 Not possible through Paseo (no API): LSP/diagnostics, Codex MCP health, true redo (old replies can't be restored),
