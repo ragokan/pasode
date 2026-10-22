@@ -40,26 +40,31 @@ export default {
 
     if (ctx.options.notifications === false || !(inWarp(process.env) || kaku)) return
     if (kaku) {
-      // Paseo notifies one present client per finish (its computeNotificationPlan). Report this one as present, with
-      // its shown session and terminal focus, so the desktop app or a phone doesn't repeat Kaku's notification.
+      // Paseo notifies one present client per finish (its computeNotificationPlan). Report this one like the host's
+      // own presence (src/presence.ts): its shown session and terminal focus, and when it last had real input or
+      // focus. A beat is never activity, or an idle or blurred terminal would keep claiming alerts nobody sees.
       let visible = true
+      let activeAt = Date.now()
+      const active = () => { activeAt = Date.now() }
       const beat = () => {
         try {
-          ctx.paseo.daemon.sendHeartbeat({ deviceType: "web", focusedAgentId: ctx.paseo.agentId() ?? null, appVisible: visible, lastActivityAt: new Date().toISOString() })
+          ctx.paseo.daemon.sendHeartbeat({ deviceType: "web", focusedAgentId: ctx.paseo.agentId() ?? null, appVisible: visible, lastActivityAt: new Date(activeAt).toISOString() })
         } catch {}
       }
-      const focus = () => { visible = true; beat() }
+      const focus = () => { visible = true; active(); beat() }
       const blur = () => { visible = false; beat() }
       ctx.renderer.on("focus", focus)
       ctx.renderer.on("blur", blur)
+      ctx.renderer.keyInput.on("keypress", active)
       const events = ctx.paseo.daemon.observeEvents(["agent_attention_required"], { notifications: true })
       events.ready.catch(() => {})
-      createEffect(beat) // and whenever the shown session changes
+      createEffect(() => { active(); beat() }) // and whenever the shown session changes, which is activity too
       const heartbeat = setInterval(beat, 30_000)
       onCleanup(() => {
         clearInterval(heartbeat)
         ctx.renderer.off("focus", focus)
         ctx.renderer.off("blur", blur)
+        ctx.renderer.keyInput.off("keypress", active)
         void events.release().catch(() => {})
       })
     }

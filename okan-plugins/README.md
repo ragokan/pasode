@@ -28,10 +28,12 @@ The host's built-in sidebar sections (Context, MCP, Todo, Modified Files, Speed/
 The session on screen speaks Warp's rich `warp://cli-agent` protocol (session start, prompt submit, permission request/reply, stop with the last query and response), so Warp shows the pane as a running/finished agent. Warp only accepts that from agents it knows by command name, so the plugin reports itself as `opencode` and `~/.warp/settings.toml` maps the `pasode` command to OpenCode (`[agents.third_party.cli_agent_toolbar_enabled_commands] '^pasode\b' = "OpenCode"`). Other sessions send nothing. "Finished" comes only from the daemon's attention flag, never from status (status flickers idle → running while a session starts); the host acknowledges that flag for the session you're looking at, like the Paseo app, so the next finish is announced again. Verified live in Warp. Sequences are emitted only when `TERM_PROGRAM` is Warp; `options.notifications === false` disables them, not titles.
 
 In Kaku (`TERM_PROGRAM=Kaku`), like ocode there: a running session's title shows a braille spinner (250 ms), and the session on screen sends one notification per event through OpenTUI's `triggerNotification`: `🟡 <title>` when it needs input, `✓`/`🔴 <title>` with the start of the last response when it finishes. Kaku shows them while its window is in the background; `options.notifications === false` disables them too.
-Paseo notifies one present client per finish, so in Kaku pasode subscribes to `agent_attention_required` with
-notifications and sends heartbeats (present, its shown session, terminal focus): the Paseo desktop app and phone then
-stay quiet while pasode runs there, including for sessions it doesn't show. A finished session keeps its ✓/🔴 after
-the host acknowledges the flag, until it runs again.
+Paseo notifies one present client per finish, so in Kaku the plugin (not the host, which sends none there) subscribes
+to `agent_attention_required` with notifications and sends heartbeats like the host's own presence: its shown session,
+terminal focus and the time of the last real key press or focus, never the beat itself. The Paseo desktop app and
+phone stay quiet only while you are actually using the terminal (the daemon counts a client present for 3 minutes
+after its last activity); an idle or blurred Kaku is not claimed. A finished session keeps its ✓/🔴 after the host
+acknowledges the flag, until it runs again.
 
 ## Deliberately omitted
 
