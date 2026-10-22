@@ -29,6 +29,13 @@ const [paneId, setPaneId] = createSignal<string>()
 const [paneFocused, setPaneFocused] = createSignal(false)
 export { paneFocused }
 
+/** The terminal list and pane as at launch; for tests, which share one process. */
+export function resetTerminals() {
+  setStore({ cwd: undefined, list: [] })
+  setPaneId(undefined)
+  setPaneFocused(false)
+}
+
 /** The daemon pushes the directory's terminal list on every change; the pane belongs to the directory too. */
 export function useTerminalFeed() {
   createEffect(() => {

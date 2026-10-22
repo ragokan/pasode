@@ -5,7 +5,7 @@ import type { CliRenderer } from "@opentui/core"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { createRoot, For, getOwner, runWithOwner, type JSX, type Owner } from "solid-js"
+import { createRoot, For, getOwner, onCleanup, runWithOwner, type JSX, type Owner } from "solid-js"
 import { createStore } from "solid-js/store"
 import { registerCommands, runCommand, type Command } from "./commands"
 import { pluginSpecs } from "./config"
@@ -105,8 +105,12 @@ export const [loadedPlugins, setLoadedPlugins] = createStore<{ id: string; spec:
 /** Call from inside the app (needs the reactive owner) after ensureRuntimePluginSupport() ran in the launcher. */
 export async function loadPlugins(renderer: CliRenderer, features: PasodePlugin[] = []) {
   const owner = getOwner() as Owner
+  // A root isn't owned by the scope it's created in, so dispose each with the app: their slots go away with it.
+  const roots: (() => void)[] = []
+  runWithOwner(owner, () => onCleanup(() => roots.forEach((dispose) => dispose())))
+  const mount = <T,>(setup: () => T) => runWithOwner(owner, () => createRoot((dispose) => (roots.push(dispose), setup())))
   // Built-in features first; /status lists only the plugins from cli.json.
-  for (const feature of features) runWithOwner(owner, () => createRoot(() => feature.setup(context(feature.id, {}, renderer))))
+  for (const feature of features) mount(() => feature.setup(context(feature.id, {}, renderer)))
   for (const spec of pluginSpecs()) {
     try {
       if (spec.error) throw new Error(spec.error)
@@ -115,7 +119,7 @@ export async function loadPlugins(renderer: CliRenderer, features: PasodePlugin[
       // A module may export one plugin or several (like ocode's consolidated entry).
       for (const plugin of (Array.isArray(exported) ? exported : [exported]) as PasodePlugin[]) {
         if (typeof plugin?.setup !== "function") throw new Error("default export has no setup(ctx)")
-        await runWithOwner(owner, () => createRoot(() => plugin.setup(context(plugin.id ?? spec.spec, spec.options, renderer))))
+        await mount(() => plugin.setup(context(plugin.id ?? spec.spec, spec.options, renderer)))
         setLoadedPlugins((list) => [...list, { id: plugin.id ?? spec.spec, spec: spec.spec }])
       }
     } catch (error) {
