@@ -4,7 +4,7 @@ OpenCode-style terminal client for a running [Paseo](https://paseo.sh) daemon. S
 steer here are the same ones the Paseo desktop and mobile apps show, live. Claude and Codex only.
 
 Built on OpenTUI + Solid (OpenCode's UI stack) and `@getpaseo/client`; much of the UI is ported from
-OpenCode (MIT). Plugins live in [`okan-plugins/`](okan-plugins).
+OpenCode (MIT). Plugins live in [`custom-plugins/`](custom-plugins).
 
 Install a release binary (macOS or Linux, arm64 or x64). It mentions newer releases when it opens; `/update` installs
 one and restarts into the same session.
@@ -44,7 +44,7 @@ Same shape as OpenCode's `cli.json` where it overlaps:
   "animations": true, // false: still ⋯ instead of spinners
   "mouse": true, // false: no terminal mouse capture
   "attention": { "notifications": true }, // desktop notifications while the terminal is unfocused
-  "plugins": ["~/coding/pasode/okan-plugins"] // or ["path", { options }]
+  "plugins": ["~/coding/pasode/custom-plugins"] // or ["path", { options }]
 }
 ```
 

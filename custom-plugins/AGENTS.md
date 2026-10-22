@@ -1,4 +1,4 @@
-# okan-plugins
+# custom-plugins
 
 <!-- Provenance: local working agreements adapted from ~/coding/ocode/AGENTS.md. -->
 

@@ -112,13 +112,13 @@ test("inside Warp or Kaku with the warp plugin loaded, its notifications are the
   const ux = await mount()
   ux.agent("w1", "Warp session")
   setAgentId("w1")
-  setLoadedPlugins([{ id: "warp", spec: "okan-plugins" }])
+  setLoadedPlugins([{ id: "warp", spec: "custom-plugins" }])
   ux.attention("w1", "finished") // not in a Warp terminal: the plugin does nothing there, so ours still fires
   expect(ux.notified).toHaveLength(1)
   process.env.TERM_PROGRAM = "Kaku"
   ux.attention("w1", "finished")
   expect(ux.notified).toHaveLength(1)
-  setLoadedPlugins([{ id: "warp", spec: "okan-plugins", error: "failed to load" }])
+  setLoadedPlugins([{ id: "warp", spec: "custom-plugins", error: "failed to load" }])
   ux.attention("w1", "finished")
   expect(ux.notified).toHaveLength(2)
 })
@@ -152,7 +152,7 @@ test("the window title follows the session, goes back to pasode on home, and is 
 test("with the warp plugin loaded the window title is left to it", async () => {
   const ux = await mount()
   ux.agent("t2", "Fix parser")
-  setLoadedPlugins([{ id: "warp", spec: "okan-plugins" }])
+  setLoadedPlugins([{ id: "warp", spec: "custom-plugins" }])
   const count = ux.titles.length
   setAgentId("t2")
   await ux.screen.renderOnce()
@@ -345,7 +345,7 @@ test("a heartbeat that can't be sent (daemon not connected) is dropped, not thro
 
 test("where the warp plugin owns presence (Kaku), pasode sends none; one connection never carries two senders", async () => {
   process.env.TERM_PROGRAM = "Kaku"
-  setLoadedPlugins([{ id: "warp", spec: "okan-plugins" }])
+  setLoadedPlugins([{ id: "warp", spec: "custom-plugins" }])
   const ux = await mount()
   setAgentId("k1")
   setFocused(true)

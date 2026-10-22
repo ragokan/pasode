@@ -1,4 +1,4 @@
-// Provenance: formerly src/metrics.ts, adapted from opencode-sidebar-token-metrics; unchanged except the countdown now lives in okan-plugins/usage-sidebar.
+// Provenance: formerly src/metrics.ts, adapted from opencode-sidebar-token-metrics; unchanged except the countdown now lives in custom-plugins/usage-sidebar.
 export type Mark =
   | { kind: "item"; type: string; at: number; callId?: string; status?: string }
   | { kind: "turn_started"; at: number }

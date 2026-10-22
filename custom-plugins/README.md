@@ -1,4 +1,4 @@
-# okan-plugins
+# custom-plugins
 
 <!-- Provenance: ~/coding/ocode/README.md conventions; Paseo-specific content authored for pasode. -->
 
@@ -10,7 +10,7 @@ Add the consolidated entry to `~/.config/pasode/cli.json` (preserve other settin
 
 ```json
 {
-  "plugins": ["~/coding/pasode/okan-plugins"]
+  "plugins": ["~/coding/pasode/custom-plugins"]
 }
 ```
 
@@ -64,4 +64,4 @@ bun run typecheck
 
 The host's `tsconfig.json` maps `@pasode/host` to `src/plugin.tsx` **for type-only imports**; the host's `bun test` and typecheck cover this folder. No npm dependencies or symlinks are added. Package paths/provenance are recorded in `SOURCES.md`.
 
-Runtime verification must first import the host's `@opentui/solid/preload`, then call `ensureRuntimePluginSupport()` from `@opentui/solid/runtime-plugin-support/configure`, then dynamically import `okan-plugins`. `bun test` includes a child-process bundle/effect/slot-cleanup regression check. Tests do not contact providers or emit terminal notifications.
+Runtime verification must first import the host's `@opentui/solid/preload`, then call `ensureRuntimePluginSupport()` from `@opentui/solid/runtime-plugin-support/configure`, then dynamically import `custom-plugins`. `bun test` includes a child-process bundle/effect/slot-cleanup regression check. Tests do not contact providers or emit terminal notifications.

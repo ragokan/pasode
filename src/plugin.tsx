@@ -1,6 +1,6 @@
 // Plugin host, shaped after OpenCode's TUI plugins: `export default { id, setup(ctx) }`,
 // with ctx.ui.slot(...) for sidebar/home sections, ctx.commands.register(...), dialogs and toasts.
-// Plugins are listed in ~/.config/pasode/cli.json; this repo's own live in okan-plugins/.
+// Plugins are listed in ~/.config/pasode/cli.json; this repo's own live in custom-plugins/.
 import type { CliRenderer } from "@opentui/core"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
