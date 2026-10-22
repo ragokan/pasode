@@ -1,5 +1,6 @@
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, spyOn, test } from "bun:test"
+import { batch } from "solid-js"
 import { reconcile } from "solid-js/store"
 import { dialog, DialogHost } from "../src/dialog"
 import { agents, api, daemon, openTimeline, setAgents, setWorkspacePins, type PaseoAgent } from "../src/paseo"
@@ -156,4 +157,24 @@ test("opening a history result the live list doesn't hold yet still selects it a
   await settle()
   expect(agentId()).toBe("beyond")
   expect(agents.beyond?.title).toBe("Older than the live snapshot")
+})
+
+test("a list that filled after it opened keeps the pinned session selected when it is unpinned and drops below a newer one", async () => {
+  const pinned = spyOn(daemon, "setWorkspacePinned").mockResolvedValue({ pinnedAt: null })
+  const { screen, settle } = await show(() => <SessionList />, [pinned])
+  batch(() => {
+    setAgents(reconcile({ a: agent("a", "wa", "Pinned older A", "2026-01-01T00:00:00Z"), b: agent("b", "wb", "Newer B", "2026-01-02T00:00:00Z") }))
+    setWorkspacePins(reconcile({ wa: "2026-01-03T00:00:00Z" }))
+  })
+  await settle()
+  const frame = screen.captureCharFrame()
+  expect(frame.indexOf("Pinned older A")).toBeLessThan(frame.indexOf("Newer B"))
+  screen.mockInput.pressKey("f", { ctrl: true })
+  await settle()
+  expect(pinned.mock.calls).toEqual([["wa", false]])
+  const after = screen.captureCharFrame()
+  expect(after.indexOf("Newer B")).toBeLessThan(after.indexOf("Pinned older A"))
+  screen.mockInput.pressEnter()
+  await settle()
+  expect(agentId()).toBe("a")
 })
