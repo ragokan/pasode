@@ -1,6 +1,7 @@
 // Terminal conveniences from OpenCode (MIT): copy on select, desktop notifications (attention.ts), window title,
 // suspend, and the view toggles. App calls installUx once; the pure parts are exported for tests.
 import { RendererControlState, type CliRenderer, type Selection } from "@opentui/core"
+import { useKeyboard } from "@opentui/solid"
 import { createEffect, onCleanup } from "solid-js"
 import { registerCommands, type Command } from "./commands"
 import { copyToClipboard, useClipboardRenderer } from "./copy"
@@ -8,6 +9,7 @@ import { truncate } from "./dialog"
 import { agents, daemon, sessionTitle } from "./paseo"
 import { cycleRecentModel } from "./models"
 import { loadedPlugins } from "./plugin"
+import { ACK_MS, createPresence, HEARTBEAT_MS, routeAttention } from "./presence"
 import { agentId, current, notify, prefs, setPref, showError, type Prefs } from "./state"
 import { applyTheme } from "./theme"
 import { loadTheme } from "./themes"
@@ -70,9 +72,10 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
   renderer.on("selection", onSelection)
   onCleanup(() => renderer.off("selection", onSelection))
 
-  // The warp plugin owns the title (with status marks) wherever it is loaded, and notifications inside Warp and Kaku.
+  // The warp plugin owns the title (with status marks) wherever it is loaded, and notifications and Kaku's heartbeats
+  // inside Warp and Kaku: there we send neither, so the daemon never hears two presences from one connection.
   const warp = () => loadedPlugins.some((plugin) => plugin.id === "warp" && !plugin.error)
-  const warpTerminal = () => ["warpterminal", "warp", "kaku"].includes(process.env.TERM_PROGRAM?.toLowerCase() ?? "")
+  const warpOwns = () => warp() && ["warpterminal", "warp", "kaku"].includes(process.env.TERM_PROGRAM?.toLowerCase() ?? "")
 
   // The title last written (undefined: not ours). Agent updates re-run this often, so unchanged titles aren't re-sent;
   // `resumed` forces one after a suspend, when the shell has set its own.
@@ -88,20 +91,50 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
   createEffect(() => retitle())
   renderer.once("destroy", () => written !== undefined && renderer.setTerminalTitle(""))
 
-  // Like Paseo's apps: a session finishing, failing or asking for permission while this terminal is in the background.
-  // Only sessions opened here; the Paseo app and phone notify for the rest.
+  // Tell the daemon what the Paseo app would: whether this terminal is in front and which session is open, and when we
+  // last saw real input. It routes each attention event to one client from that, and nobody is alerted for a session
+  // a visible client is focused on. The daemon forgets a client when its connection closes; the last beat says "away".
+  const presence = createPresence((beat) => {
+    try {
+      daemon.sendHeartbeat(beat)
+    } catch {} // not connected; the next beat catches up
+  })
+  useKeyboard(() => presence.active()) // shortcut: keys and focus only, so reading by mouse alone counts as idle
+  createEffect(() => {
+    if (!warpOwns()) presence.setVisible(terminalFocused())
+  })
+  createEffect(() => {
+    if (!warpOwns()) presence.setAgent(agentId() ?? null)
+  })
+  createEffect(() => {
+    if (warpOwns()) return
+    presence.beat()
+    const timer = setInterval(presence.beat, HEARTBEAT_MS)
+    onCleanup(() => clearInterval(timer))
+  })
+  renderer.once("destroy", () => warpOwns() || presence.setVisible(false))
+
+  // A session finishing, failing or asking for permission, as the daemon routes it (shouldNotify): the background
+  // gets a desktop notification, a terminal in front a toast. A client the daemon didn't count (idle) falls back to
+  // sessions opened here that nobody acknowledged, since the Paseo apps clear the flag when you view the session.
   const watched = new Set<string>()
   createEffect(() => {
     const id = agentId()
     if (id) watched.add(id)
   })
+  const show = (event: Parameters<typeof attentionNotice>[0] & { agentId: string }) => {
+    const agent = agents[event.agentId]
+    const { title, message } = attentionNotice(event, agent && sessionTitle(agent))
+    if (terminalFocused()) notify(message, ({ finished: "success", error: "error", permission: "warning" } as const)[event.reason], title)
+    else renderer.triggerNotification(message, title)
+  }
   const events = daemon.observeEvents(["agent_attention_required"], { notifications: true })
   events.ready.catch(() => {})
   const off = daemon.onAgentAttentionRequired((event) => {
-    if (!prefs.notifications || terminalFocused() || !watched.has(event.agentId) || (warp() && warpTerminal())) return
-    const agent = agents[event.agentId]
-    const { title, message } = attentionNotice(event, agent && sessionTitle(agent))
-    renderer.triggerNotification(message, title)
+    if (!prefs.notifications || warpOwns()) return
+    const route = routeAttention({ shouldNotify: event.shouldNotify, present: presence.present(), watched: watched.has(event.agentId) })
+    if (route === "now") show(event)
+    else if (route === "unacknowledged") setTimeout(() => agents[event.agentId]?.requiresAttention && !terminalFocused() && show(event), ACK_MS)
   })
   onCleanup(() => {
     off()
