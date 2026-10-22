@@ -2,7 +2,7 @@
 
 <!-- Provenance: ~/coding/ocode/README.md conventions; Paseo-specific content authored for pasode. -->
 
-Local terminal plugins for **paseo-tui**, the Bun 1.4.2 / OpenTUI 0.5.17 / Solid client for the Paseo daemon. Like `ocode` for OpenCode, this folder contains plugins, not live configuration or credentials.
+Local terminal plugins for **paseo-tui**, the Bun 1.4.4 / OpenTUI 0.5.17 / Solid client for the Paseo daemon. Like `ocode` for OpenCode, this folder contains plugins, not live configuration or credentials.
 
 ## Install
 

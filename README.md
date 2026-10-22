@@ -184,7 +184,8 @@ Plugins import `solid-js` / `@opentui/*` normally; the launcher maps them onto t
 
 ## Checks
 
-`bun test` and `bun run typecheck`.
+`bun test` and `bun run typecheck` (Bun's `bun check`; `typescript` stays pinned to the version Bun checks with,
+`bun -p process.versions.typescript`, so editors agree).
 
 ## Releasing
 
