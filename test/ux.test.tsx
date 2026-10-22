@@ -381,3 +381,27 @@ test("pending fallback alerts are cancelled when the app is torn down", async ()
   ux.renderer.destroy() // disposes the app's reactive tree
   expect(ux.cleared).toContain(1) // the id the pending timer was given
 })
+
+test("the daemon sends each event twice to a client with the session open (one copy never routed, shouldNotify false): one alert, not two", async () => {
+  const ux = await mount()
+  ux.agent("d1", "Opened here")
+  setAgentId("d1")
+  // Picked: the routed copy alerts, and the unrouted copy for a counted client is ignored.
+  ux.attention("d1", "finished", "Done", false)
+  ux.attention("d1", "finished", "Done", true)
+  expect(ux.notified).toHaveLength(1)
+
+  // Idle: both copies say false, and there is one wait for the pair, not one each.
+  ux.notified.length = 0
+  ux.clock.offset = 151_000
+  setAgents("d1", "requiresAttention", true)
+  ux.attention("d1", "finished", "Done", false)
+  ux.attention("d1", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(1)
+  ux.timeouts.pop()!()
+  expect(ux.notified).toHaveLength(1)
+
+  // A later event for the same session is its own wait.
+  ux.attention("d1", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(1)
+})

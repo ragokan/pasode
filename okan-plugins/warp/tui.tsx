@@ -4,11 +4,14 @@ import { writeFileSync } from "node:fs"
 import { createEffect, createSignal, onCleanup, untrack } from "solid-js"
 import type { PasodePlugin } from "@pasode/host"
 import { formatTitle, inKaku, inWarp, PLUGIN_VERSION, richSequence, SPINNER, SPINNER_MS, truncate, WARP_TITLE_MAX } from "./payload"
+import { ACK_MS, PRESENT_MS, routeAttention } from "./routing"
 import { createTransitions, type AgentState } from "./transitions"
 
 const HANDSHAKE_DELAY_MS = 1000
 /** A turn that ends without an attention flag (e.g. interrupted) still has to clear Warp's busy badge. */
 const SETTLE_MS = 3000
+const GLYPH = { permission: "🟡 ", finished: "✓ ", error: "🔴 " } as const
+const VARIANT = { permission: "warning", finished: "success", error: "error" } as const
 
 export default {
   id: "warp",
@@ -60,7 +63,41 @@ export default {
       events.ready.catch(() => {})
       createEffect(() => { active(); beat() }) // and whenever the shown session changes, which is activity too
       const heartbeat = setInterval(beat, 30_000)
+
+      // Alerts follow the host's policy (./routing.ts): the daemon's attention event says whether it picked this client.
+      const watched = new Set<string>()
+      createEffect(() => {
+        const id = ctx.paseo.agentId()
+        if (id) watched.add(id)
+      })
+      const alert = (event: { agentId: string; reason: keyof typeof GLYPH; notification?: { body: string } }) => {
+        const live = ctx.paseo.agents[event.agentId]
+        const title = formatTitle(live && ctx.paseo.sessionTitle(live), GLYPH[event.reason])
+        const message = event.reason === "permission" ? "Needs your input"
+          : lastText(event.agentId, "assistant_message").replace(/\s+/g, " ") || event.notification?.body || "Session done"
+        // Kaku shows nothing while its window is in front, so a routed alert there is a toast.
+        if (visible) ctx.ui.toast(message, VARIANT[event.reason], title)
+        else ctx.renderer.triggerNotification(message, title)
+      }
+      const waiting = new Map<string, ReturnType<typeof setTimeout>>()
+      const unsubscribe = ctx.paseo.daemon.onAgentAttentionRequired((event) => {
+        if (!ctx.state.prefs.notifications) return
+        const route = routeAttention({ shouldNotify: event.shouldNotify, present: Date.now() - activeAt <= PRESENT_MS, watched: watched.has(event.agentId) })
+        if (route === "now") alert(event)
+        else if (route === "unacknowledged") {
+          // A client with the session open gets each event twice (the provider's copy is never routed: shouldNotify false).
+          const key = `${event.agentId}:${event.reason}`
+          if (waiting.has(key)) return
+          // Everything is rechecked when it fires: the pref, focus and the flag can all change during the wait.
+          waiting.set(key, setTimeout(() => {
+            waiting.delete(key)
+            if (ctx.state.prefs.notifications && !visible && ctx.paseo.agents[event.agentId]?.requiresAttention) alert(event)
+          }, ACK_MS))
+        }
+      })
       onCleanup(() => {
+        unsubscribe()
+        waiting.forEach((timer) => clearTimeout(timer))
         clearInterval(heartbeat)
         ctx.renderer.off("focus", focus)
         ctx.renderer.off("blur", blur)
@@ -121,17 +158,11 @@ export default {
         } else if (change.event === "permission_request") {
           const pending = agent.pendingPermissions[0]
           if (onScreen) rich("permission_request", agent, { summary: formatTitle(titleOf(agent)), tool_name: pending?.name ?? "permission", tool_input: pending?.input ?? {} })
-          if (onScreen && kaku) ctx.renderer.triggerNotification("Needs your input", formatTitle(titleOf(agent), "🟡 "))
         } else if (change.event === "permission_replied") {
           if (onScreen) rich("permission_replied", agent)
         } else if (change.event === "stop") {
           busy.delete(agent.id)
           if (onScreen) rich("stop", agent, { query: lastText(agent.id, "user_message"), response: lastText(agent.id, "assistant_message"), transcript_path: "" })
-          // Kaku, like ocode there: one notification per event, only for the session on screen.
-          if (onScreen && kaku) {
-            const title = formatTitle(titleOf(agent), change.outcome === "error" ? "🔴 " : "✓ ")
-            ctx.renderer.triggerNotification(lastText(agent.id, "assistant_message").replace(/\s+/g, " ") || "Session done", title)
-          }
         } else if (change.event === "settled" && onScreen && busy.has(agent.id)) {
           settleTimers.set(agent.id, setTimeout(() => {
             const now = ctx.paseo.agents[agent.id]
