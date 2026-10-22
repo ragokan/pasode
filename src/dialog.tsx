@@ -127,20 +127,24 @@ export function DialogSelect<T>(props: {
       if (props.onFilter) selectedValue = undefined
     }),
   )
+  // Options changing under the cursor: it stays on its option, wherever that went. Unanchored (the list was empty) or gone,
+  // it stays on the row, which now holds the option that took its place; either way that option becomes the anchor.
   createEffect(
     on(
       filtered,
       (list) => {
         const at = selectedValue === undefined ? -1 : list.findIndex((option) => option.value === selectedValue)
-        if (at >= 0 && at !== selected()) setSelected(at)
+        const index = at >= 0 ? at : Math.min(selected(), Math.max(0, list.length - 1))
+        if (index !== selected()) {
+          setSelected(index)
+          // A moved row only has its new place once layout has run: two frames, like the transcript's afterLayout.
+          requestAnimationFrame(() => requestAnimationFrame(() => scroll && !scroll.isDestroyed && scroll.scrollChildIntoView(`dialog-option-${index}`)))
+        }
+        selectedValue = list[index]?.value
       },
       { defer: true },
     ),
   )
-  // Keep the cursor inside the list when options change underneath it (live session updates).
-  createEffect(() => {
-    if (selected() >= filtered().length) select(Math.max(0, filtered().length - 1))
-  })
 
   function moveTo(index: number) {
     select(index)

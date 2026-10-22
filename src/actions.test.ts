@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { canRedo, chooseMessage, cycleAgent, cycleChild, exportTranscript, fork, pin, redo, revertBlocker, revertTo } from "./actions"
+import { canRedo, chooseMessage, cycleAgent, cycleChild, exportTranscript, fork, locateMessage, pin, redo, revertBlocker, revertTo } from "./actions"
 import { dialogs } from "./dialog"
 import { agents, api, daemon, openTimeline, setAgents, setTimeline, timeline, workspacePins, type PaseoAgent } from "./paseo"
 import { agentId, draft, setAgentId, setDraft, setPref, setToast, toast } from "./state"
@@ -279,6 +279,38 @@ test("fork stops when the chosen message changes while the daemon is asked for i
     list.mockRestore()
     context.mockRestore()
     setAgentId(undefined)
+    setToast(undefined)
+  }
+})
+
+test("a repeated prompt is told apart by its client id, or by its time and place when it has no id at all", async () => {
+  // Codex's out-of-band prompts (/goal pause) carry a clientMessageId but no messageId.
+  const repeated = (ids: boolean, times: number[]) => {
+    const rows = ["user_message", "assistant_message", "user_message"].map((type, i) => ({ type, text: type === "user_message" ? "/goal pause" : "ok", ...(ids && type === "user_message" ? { clientMessageId: `c${i}` } : {}) }))
+    setAgents("rep", { id: "rep", provider: "codex", cwd: "/tmp", title: "Repeats" } as PaseoAgent)
+    setAgentId("rep")
+    setTimeline({ agentId: "rep", rows: rows as never, times, marks: [], loading: false, hasOlder: false, startCursor: undefined })
+  }
+  const list = spyOn(daemon, "listAgentTimelinePrompts").mockResolvedValue({
+    epoch: "e",
+    prompts: [{ seq: 1, timestamp: new Date(1000).toISOString(), preview: "/goal pause" }, { seq: 3, timestamp: new Date(2000).toISOString(), preview: "/goal pause" }],
+  } as never)
+  const page = spyOn(daemon, "fetchAgentTimeline").mockResolvedValue({ reset: false, epoch: "e", entries: [] } as never)
+  try {
+    for (const [ids, times] of [[true, [1000, 1001, 2000]], [false, [1000, 1001, 2000]], [false, [1000, 1001, 1000]]] as const) {
+      repeated(ids, [...times])
+      expect([0, 2].map((index) => locateMessage(pick(index)))).toEqual([0, 2])
+      page.mockClear()
+      // With the same timestamp on both, the daemon's index can't tell them apart either; only the order does.
+      list.mockResolvedValue({ epoch: "e", prompts: [1, 3].map((seq, i) => ({ seq, timestamp: new Date(times[i * 2]!).toISOString(), preview: "/goal pause" })) } as never)
+      await fork({ chosen: pick(0), restore: () => {} })
+      expect(page.mock.calls[0]![1]!.cursor!.seq).toBe(1)
+    }
+  } finally {
+    list.mockRestore()
+    page.mockRestore()
+    setAgentId(undefined)
+    setDraft({ provider: "claude" })
     setToast(undefined)
   }
 })

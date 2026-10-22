@@ -1,7 +1,7 @@
 // Workspace scripts (paseo.json): lifecycle, health, port and proxy URL of the open session's workspace, start/stop live,
 // plus setup progress and, for a PR workspace whose scripts were blocked, the trust-and-run-setup action. Paseo-native;
 // the scripts run in Paseo terminals (output opens like /shells).
-import { createMemo, createSignal, onCleanup } from "solid-js"
+import { batch, createMemo, createSignal, onCleanup } from "solid-js"
 import { openShellOutput } from "../composer"
 import { dialog, dialogs, DialogSelect } from "../dialog"
 import { api, daemon } from "../paseo"
@@ -49,9 +49,12 @@ function Scripts(props: { workspaceId: string }) {
     Promise.all([daemon.listWorkspaceScripts(id), daemon.fetchWorkspaceSetupStatus(id)])
       .then(([list, status]) => {
         if (list.error) throw new Error(list.error)
-        setScripts(list.scripts ?? [])
-        setSetup(status.snapshot)
-        setLoaded(true)
+        // One update: the list must not show the scripts first and the setup row above them a step later.
+        batch(() => {
+          setScripts(list.scripts ?? [])
+          setSetup(status.snapshot)
+          setLoaded(true)
+        })
       })
       .catch(showError)
   void load()

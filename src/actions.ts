@@ -5,7 +5,7 @@ import { createSignal } from "solid-js"
 import { copyToClipboard } from "./copy"
 import { dialogs } from "./dialog"
 import { pickBaseBranch } from "./git/branches"
-import { locatePrompt } from "./messages"
+import { locatePrompt, userRowKeys } from "./messages"
 import { agents, api, daemon, findModel, loadOlder, ownWorkspace, sessionTitle, setWorkspacePins, timeline, workspacePins, type PaseoAgent } from "./paseo"
 import { current, draft, navigate, notify, prefs, setDraft, showError, subagent } from "./state"
 import { toolSummary, type AgentTimelineItem } from "./timeline"
@@ -146,14 +146,29 @@ const [undoRevision, setUndoRevision] = createSignal(0)
 
 type UserRow = Extract<AgentTimelineItem, { type: "user_message" }>
 
-/** A user message as it was when chosen. Refetches rewrite loaded rows in place, so later steps trust only these plain values. */
-export type Chosen = { agentId: string; messageId?: string; text: string }
+/**
+ * A user message as it was when chosen. Refetches rewrite loaded rows in place, so later steps trust only these plain
+ * values. A message the provider hasn't named (Codex's /goal pause) is found by its client id, or failing that by its
+ * time, text and place among identical ones (`key`, see userRowKeys).
+ */
+export type Chosen = { agentId: string; messageId?: string; clientMessageId?: string; key?: string; text: string }
 
-export const chooseMessage = (row: UserRow): Chosen | undefined => (timeline.agentId ? { agentId: timeline.agentId, messageId: row.messageId, text: row.text } : undefined)
+export const chooseMessage = (row: UserRow): Chosen | undefined => {
+  if (!timeline.agentId) return
+  const at = timeline.rows.indexOf(row)
+  const key = [...userRowKeys(timeline.rows, timeline.times)].find(([, index]) => index === at)?.[0]
+  return { agentId: timeline.agentId, messageId: row.messageId, clientMessageId: row.clientMessageId, key, text: row.text }
+}
 
 /** Where the chosen message sits in the open timeline now (-1: another session is open, or it's gone). */
-export const locateMessage = (chosen: Chosen) =>
-  timeline.agentId === chosen.agentId ? timeline.rows.findLastIndex((row) => row.type === "user_message" && row.messageId === chosen.messageId && row.text === chosen.text) : -1
+export const locateMessage = (chosen: Chosen) => {
+  if (timeline.agentId !== chosen.agentId) return -1
+  if (chosen.messageId || chosen.clientMessageId)
+    return timeline.rows.findLastIndex(
+      (row) => row.type === "user_message" && (chosen.messageId ? row.messageId === chosen.messageId : row.clientMessageId === chosen.clientMessageId) && row.text === chosen.text,
+    )
+  return chosen.key === undefined ? -1 : (userRowKeys(timeline.rows, timeline.times).get(chosen.key) ?? -1)
+}
 
 export const gone = () => notify("That message is no longer in the session", "warning")
 
