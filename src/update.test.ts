@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import os from "node:os"
 import path from "node:path"
 import pkg from "../package.json"
-import { install, newerRelease, type Release } from "./update"
+import { install, newerRelease, updateCommand, type Release } from "./update"
 
 const dir = mkdtempSync(path.join(os.tmpdir(), "pasode-update-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -47,4 +47,44 @@ test("install swaps in the binary only when it matches the release checksums", a
   expect(readFileSync(target, "utf8")).toBe("new binary")
   expect(statSync(target).mode & 0o777).toBe(0o755)
   expect(existsSync(`${target}.update`)).toBe(false)
+})
+
+const latest = "https://api.github.com/repos/ragokan/pasode/releases/latest"
+
+test("pasode update installs a newer release over the binary and reports old -> new", async () => {
+  const target = path.join(dir, "pasode-cli")
+  writeFileSync(target, "old binary")
+  const archive = Bun.gzipSync(new TextEncoder().encode("new binary"))
+  github({ [latest]: JSON.stringify(release("v99.0.0")), [`https://dl/${asset}`]: archive, "https://dl/SHA256SUMS": `${sha256(archive)}  ${asset}\n` })
+  expect(await updateCommand(target, true)).toBe(`pasode ${pkg.version} -> 99.0.0`)
+  expect(readFileSync(target, "utf8")).toBe("new binary")
+})
+
+test("pasode update leaves a current binary alone", async () => {
+  const target = path.join(dir, "pasode-current")
+  writeFileSync(target, "old binary")
+  github({ [latest]: JSON.stringify(release(`v${pkg.version}`)) })
+  expect(await updateCommand(target, true)).toBe(`pasode ${pkg.version} is up to date`)
+  expect(readFileSync(target, "utf8")).toBe("old binary")
+})
+
+test("pasode update fails, keeping the binary, when GitHub can't be reached or the checksum is wrong", async () => {
+  const target = path.join(dir, "pasode-failing")
+  writeFileSync(target, "old binary")
+  fetchMock = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unable to connect"))
+  await expect(updateCommand(target, true)).rejects.toThrow("Unable to connect")
+  fetchMock.mockRestore()
+  github({}) // GitHub answers, but not with a release
+  await expect(updateCommand(target, true)).rejects.toThrow("GitHub answered 404")
+  fetchMock?.mockRestore()
+  const archive = Bun.gzipSync(new TextEncoder().encode("new binary"))
+  github({ [latest]: JSON.stringify(release("v99.0.0")), [`https://dl/${asset}`]: archive, "https://dl/SHA256SUMS": `${"0".repeat(64)}  ${asset}\n` })
+  await expect(updateCommand(target, true)).rejects.toThrow("doesn't match the release checksums")
+  expect(readFileSync(target, "utf8")).toBe("old binary")
+})
+
+test("pasode update refuses a source checkout before asking GitHub", async () => {
+  fetchMock = spyOn(globalThis, "fetch")
+  await expect(updateCommand(path.join(dir, "unused"), false)).rejects.toThrow("source checkout")
+  expect(fetchMock).not.toHaveBeenCalled()
 })

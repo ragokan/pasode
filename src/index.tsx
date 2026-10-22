@@ -4,6 +4,7 @@ import { agents, connect, disconnect, sessionTitle } from "./paseo"
 
 const usage = `paseo-tui [-s] [agent-id]
 paseo-tui -v | --version
+paseo-tui update         install the latest release over this binary
 
 OpenCode-style terminal client for a running Paseo daemon.
 New sessions start in the current directory.
@@ -19,6 +20,16 @@ if (arg === "-h" || arg === "--help") {
 if (arg === "-v" || arg === "--version") {
   console.log(pkg.version)
   process.exit(0)
+}
+if (process.argv[2] === "update") {
+  const { updateCommand } = await import("./update")
+  try {
+    console.log(await updateCommand())
+    process.exit(0)
+  } catch (error) {
+    console.error(`pasode update failed: ${error instanceof Error ? error.message : error}`)
+    process.exit(1)
+  }
 }
 
 // Connect while the app's modules load (they take longer than the handshake), and apply the theme before the first frame.

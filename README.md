@@ -7,7 +7,9 @@ Built on OpenTUI + Solid (OpenCode's UI stack) and `@getpaseo/client`; much of t
 OpenCode (MIT). Plugins live in [`custom-plugins/`](custom-plugins).
 
 Install a release binary (macOS or Linux, arm64 or x64). It mentions newer releases when it opens; `/update` installs
-one and restarts into the same session.
+one and restarts into the same session. From the shell, `pasode update` does the same without opening the TUI: it prints
+`pasode 0.3.0 -> 0.4.0` or `pasode 0.3.0 is up to date`, and exits non-zero if it can't update (GitHub unreachable, checksum
+mismatch, or a source checkout).
 
 ```sh
 mkdir -p ~/.local/bin && curl -fL "https://github.com/ragokan/pasode/releases/latest/download/pasode-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/').gz" | gunzip > ~/.local/bin/pasode && chmod +x ~/.local/bin/pasode

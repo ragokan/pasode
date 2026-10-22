@@ -51,6 +51,15 @@ export async function update(quit: () => void) {
   quit()
 }
 
+/** `pasode update`: /update from the shell. Returns the line to print; throws (non-zero exit) when it can't update. */
+export async function updateCommand(target = process.execPath, binary = compiled) {
+  if (!binary) throw new Error("this is a source checkout: update it with git pull")
+  const release = await newerRelease()
+  if (!release) return `pasode ${pkg.version} is up to date`
+  await install(release, target)
+  return `pasode ${pkg.version} -> ${release.tag_name.replace(/^v/, "")}`
+}
+
 /** On open: mention a newer release, quietly (offline or rate-limited checks just skip). */
 export const checkForUpdate = () =>
   newerRelease()
