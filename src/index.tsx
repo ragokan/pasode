@@ -1,7 +1,9 @@
+import pkg from "../package.json"
 import { startLocalDaemon } from "./local-daemon"
 import { agents, connect, disconnect, sessionTitle } from "./paseo"
 
 const usage = `paseo-tui [-s] [agent-id]
+paseo-tui -v | --version
 
 OpenCode-style terminal client for a running Paseo daemon.
 New sessions start in the current directory.
@@ -12,6 +14,10 @@ env: PASEO_URL (default ws://127.0.0.1:6767/ws), PASEO_PASSWORD`
 const arg = ["-s", "--session"].includes(process.argv[2] ?? "") ? process.argv[3] : process.argv[2]
 if (arg === "-h" || arg === "--help") {
   console.log(usage)
+  process.exit(0)
+}
+if (arg === "-v" || arg === "--version") {
+  console.log(pkg.version)
   process.exit(0)
 }
 

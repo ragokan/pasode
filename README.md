@@ -19,6 +19,7 @@ Or run from source:
 bun install
 bun bin/paseo-tui.ts            # home: new session in the current directory
 bun bin/paseo-tui.ts -s 1c9a5b6 # open a session (full ID or `paseo ls` prefix; `-s` optional)
+bun bin/paseo-tui.ts --version  # print the version (`-v` too) and exit; no TUI, no daemon
 ```
 
 On your PATH: `chmod +x bin/paseo-tui.ts && ln -s "$PWD/bin/paseo-tui.ts" ~/.local/bin/paseo-tui`.
