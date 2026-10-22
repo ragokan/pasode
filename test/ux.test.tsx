@@ -215,14 +215,16 @@ test("ctrl+c with a mouse selection copies it and keeps the app open, instead of
   setAgents("sel", { id: "sel", provider: "claude", cwd: "/tmp", status: "idle", updatedAt: new Date().toISOString() } as PaseoAgent)
   setAgentId("sel")
   setTimeline({ agentId: "sel", rows: [{ type: "assistant_message", text: "copy these words" }], times: [1000], marks: [], loading: false, hasOlder: false })
-  for (let i = 0; i < 4; i++) {
+  // Poll rather than a fixed number of frames: under CPU load the row can take longer to mount.
+  let lines: string[] = []
+  for (let i = 0; i < 50 && !lines.some((line) => line.includes("copy these words")); i++) {
     await Bun.sleep(40)
     await screen.renderOnce()
+    lines = screen.captureCharFrame().split("\n")
   }
-  const lines = screen.captureCharFrame().split("\n")
   const y = lines.findIndex((line) => line.includes("copy these words"))
-  const x = lines[y]!.indexOf("copy these words")
   expect(y).toBeGreaterThanOrEqual(0)
+  const x = lines[y]!.indexOf("copy these words")
 
   await screen.mockMouse.drag(x, y, x + "copy these words".length - 1, y)
   await screen.renderOnce()
