@@ -51,10 +51,14 @@ async function mount() {
   spy(Date, "now", (() => realNow() + clock.offset) as never)
   const intervals: (() => void)[] = []
   const timeouts: (() => void)[] = []
+  let ackId = 0
+  const cleared: unknown[] = []
   const realSetInterval = globalThis.setInterval
   const realSetTimeout = globalThis.setTimeout
+  const realClearTimeout = globalThis.clearTimeout
   spy(globalThis, "setInterval", ((fn: () => void, ms?: number, ...rest: never[]) => (ms === HEARTBEAT_MS ? (intervals.push(fn), 0) : realSetInterval(fn, ms, ...rest))) as never)
-  spy(globalThis, "setTimeout", ((fn: () => void, ms?: number, ...rest: never[]) => (ms === ACK_MS ? (timeouts.push(fn), 0) : realSetTimeout(fn, ms, ...rest))) as never)
+  spy(globalThis, "setTimeout", ((fn: () => void, ms?: number, ...rest: never[]) => (ms === ACK_MS ? (timeouts.push(fn), ++ackId) : realSetTimeout(fn, ms, ...rest))) as never)
+  spy(globalThis, "clearTimeout", ((id: never) => (cleared.push(id), realClearTimeout(id))) as never)
   let renderer!: CliRenderer
   const titles: string[] = []
   const notified: [string, string | undefined][] = []
@@ -73,7 +77,7 @@ async function mount() {
   const attention = (agentId: string, reason: "finished" | "error" | "permission", body = "Done", shouldNotify = true) =>
     handler!({ agentId, reason, timestamp: "", shouldNotify, notification: { title: "Agent finished", body, data: {} } } as never)
   const agent = (id: string, title: string) => setAgents(id, { id, title, provider: "claude", cwd: "/tmp", status: "idle", updatedAt: "" } as PaseoAgent)
-  return { renderer, screen, titles, notified, copied, attention, agent, beats, clock, intervals, timeouts }
+  return { renderer, screen, titles, notified, copied, attention, agent, beats, clock, intervals, timeouts, cleared }
 }
 
 test("a notification routed here is a desktop notification in the background and a toast in front; the pref silences both", async () => {
@@ -352,4 +356,28 @@ test("where the warp plugin owns presence (Kaku), pasode sends none; one connect
   setLoadedPlugins([]) // the plugin failed to load: pasode takes over
   expect(ux.beats.length).toBeGreaterThan(0)
   expect(ux.intervals).toHaveLength(1)
+})
+
+test("turning notifications off during the 3 s wait cancels the pending fallback alert", async () => {
+  const ux = await mount()
+  ux.agent("f1", "Opened here")
+  setAgentId("f1")
+  ux.clock.offset = 151_000
+  setAgents("f1", "requiresAttention", true)
+  ux.attention("f1", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(1)
+  setPref("notifications", false)
+  ux.timeouts.pop()!()
+  expect(ux.notified).toEqual([])
+})
+
+test("pending fallback alerts are cancelled when the app is torn down", async () => {
+  const ux = await mount()
+  ux.agent("f2", "Opened here")
+  setAgentId("f2")
+  ux.clock.offset = 151_000
+  ux.attention("f2", "finished", "Done", false)
+  expect(ux.timeouts).toHaveLength(1)
+  ux.renderer.destroy() // disposes the app's reactive tree
+  expect(ux.cleared).toContain(1) // the id the pending timer was given
 })

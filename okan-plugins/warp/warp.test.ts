@@ -155,6 +155,7 @@ test("in Kaku: an animated spinner while running, one notification per event for
         renderer: {
           setTerminalTitle: (title) => titles.push(title), triggerNotification: (message, title) => notes.push([title, message]),
           on: (name, fn) => { listeners[name] = fn }, off: (name, fn) => { if (listeners[name] === fn) delete listeners[name] },
+          keyInput: { on() {}, off() {} },
         },
         paseo: {
           current: () => agents().a, agentId: () => "a", sessionTitle: (agent) => agent.title,
@@ -193,6 +194,75 @@ test("in Kaku: an animated spinner while running, one notification per event for
       assert.equal(released, true)
       assert.deepEqual(Object.keys(listeners), [])
       assert.equal(intervals.filter((timer) => timer.live).length, 0)
+    `],
+    cwd: host,
+    env: { ...process.env, TERM_PROGRAM: "Kaku", WARP_CLI_AGENT_PROTOCOL_VERSION: "" },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  expect(result.stderr.toString()).toBe("")
+  expect(result.exitCode).toBe(0)
+}, 15_000)
+
+test("in Kaku: heartbeats report real input and focus as activity, never the beat itself, so an idle or blurred terminal stops looking present", () => {
+  const host = path.resolve(import.meta.dir, "../..")
+  const result = Bun.spawnSync({
+    cmd: [process.execPath, "-e", `
+      const assert = (await import("node:assert/strict")).default
+      await import(Bun.resolveSync("@opentui/solid/preload", process.cwd()))
+      const { ensureRuntimePluginSupport } = await import(Bun.resolveSync("@opentui/solid/runtime-plugin-support/configure", process.cwd()))
+      ensureRuntimePluginSupport()
+      const intervals = []
+      globalThis.setInterval = (fn, ms) => intervals.push({ fn, ms, live: true })
+      globalThis.clearInterval = (id) => { if (intervals[id - 1]) intervals[id - 1].live = false }
+      let now = Date.parse("2026-01-01T00:00:00Z")
+      Date.now = () => now
+      const { default: plugin } = await import(${JSON.stringify(path.join(import.meta.dir, "tui.tsx"))})
+      const { createRoot, createSignal } = await import("opentui:runtime-module:solid-js")
+      const [shown, setShown] = createSignal("a")
+      const beats = []
+      const listeners = {}
+      const keys = new Set()
+      const iso = (at) => new Date(at).toISOString()
+      const launched = now
+      const dispose = createRoot((dispose) => (plugin.setup({
+        options: {},
+        renderer: {
+          setTerminalTitle: () => {}, triggerNotification: () => {},
+          on: (name, fn) => { listeners[name] = fn }, off: (name, fn) => { if (listeners[name] === fn) delete listeners[name] },
+          keyInput: { on: (name, fn) => { assert.equal(name, "keypress"); keys.add(fn) }, off: (name, fn) => keys.delete(fn) },
+        },
+        paseo: {
+          current: () => undefined, agentId: shown, sessionTitle: () => "",
+          agents: {}, timeline: { agentId: "a", rows: [] },
+          daemon: { sendHeartbeat: (beat) => beats.push(beat), observeEvents: () => ({ ready: Promise.resolve(), release: async () => {} }) },
+        },
+      }), dispose))
+      const beat = () => intervals.find((timer) => timer.live && timer.ms === 30000).fn()
+      assert.equal(beats.at(-1).lastActivityAt, iso(launched))
+
+      now += 181_000 // idle: the periodic beat repeats the time of the last real input
+      beat()
+      assert.equal(beats.at(-1).lastActivityAt, iso(launched))
+      listeners.blur() // leaving isn't activity either
+      assert.deepEqual([beats.at(-1).appVisible, beats.at(-1).lastActivityAt], [false, iso(launched)])
+      now += 60_000
+      beat()
+      assert.equal(beats.at(-1).lastActivityAt, iso(launched))
+
+      now += 1_000 // a key press is
+      for (const fn of keys) fn({ name: "a" })
+      beat()
+      assert.equal(beats.at(-1).lastActivityAt, iso(now))
+      now += 1_000 // coming back is
+      listeners.focus()
+      assert.deepEqual([beats.at(-1).appVisible, beats.at(-1).lastActivityAt], [true, iso(now)])
+      now += 1_000 // so is opening another session
+      setShown("b")
+      assert.deepEqual([beats.at(-1).focusedAgentId, beats.at(-1).lastActivityAt], ["b", iso(now)])
+
+      dispose()
+      assert.equal(keys.size, 0)
     `],
     cwd: host,
     env: { ...process.env, TERM_PROGRAM: "Kaku", WARP_CLI_AGENT_PROTOCOL_VERSION: "" },
