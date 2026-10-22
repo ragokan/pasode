@@ -1,7 +1,7 @@
 import type { TestRendererSetup } from "@opentui/core/testing"
 import { testRender } from "@opentui/solid"
 import { afterEach, expect, spyOn, test } from "bun:test"
-import { createSignal } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import { Prompt, type PromptRef } from "../src/prompt"
 import * as clipboard from "../src/prompt/clipboard"
 import { rendererOptions } from "../src/renderer"
@@ -227,4 +227,45 @@ test("a failed send comes back into the input when you returned to its session b
   setSessionId("fail-return-a")
   await screen!.flush()
   expect(mounted.prompt!.text()).toBe("typed since\n\ndo not lose this message")
+})
+
+test("a failed send comes back after its session was left for home and reopened (a different Prompt instance)", async () => {
+  const [sessionId, setSessionId] = createSignal<string | undefined>("remount-a")
+  const mounted: { prompt?: PromptRef } = {}
+  let fail!: (error: Error) => void
+  const pending = new Promise<void>((_, reject) => (fail = reject))
+  const props = {
+    focused: true,
+    cwd: "/tmp",
+    slashItems: [],
+    agent: { label: "Build", color: theme.agent },
+    model: { name: "Opus 5.5", provider: "Claude Code" },
+    location: "~",
+    status: { running: false, interruptArmed: false },
+    ref: (ref: PromptRef | undefined) => (mounted.prompt = ref),
+    onSubmit: () => pending,
+  }
+  // Like App: the session prompt and the home prompt are separate instances.
+  screen = await testRender(() => (
+    <Show when={sessionId()} fallback={<Prompt {...props} />}>
+      <Prompt {...props} sessionId={sessionId()} />
+    </Show>
+  ), { ...rendererOptions, width: 80, height: 24 })
+  await screen.flush()
+  mounted.prompt!.setText("keep failed message")
+  const sending = mounted.prompt!.submit()
+  await screen.flush()
+  setSessionId(undefined)
+  await screen.flush()
+  setSessionId("remount-a")
+  await screen.flush()
+  fail(new Error("daemon disconnected"))
+  await sending
+  await screen.flush()
+  expect(mounted.prompt!.text()).toBe("keep failed message")
+  setSessionId(undefined)
+  await screen.flush()
+  setSessionId("remount-a")
+  await screen.flush()
+  expect(mounted.prompt!.text()).toBe("keep failed message")
 })

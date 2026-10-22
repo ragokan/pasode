@@ -8,7 +8,7 @@ import { offsetWidth, slashTrigger } from "./slash"
 import { SplitBorder } from "../session"
 import { theme } from "../theme"
 import { readClipboard } from "./clipboard"
-import { saveDraft, takeDraft } from "./drafts"
+import { hideSession, saveDraft, showingSession, showSession, takeDraft } from "./drafts"
 import { editPrompt } from "./editor"
 import { promptHistory } from "./history"
 import { mentionTrigger, quoteMention } from "./mention"
@@ -260,9 +260,11 @@ export function Prompt(props: PromptProps) {
     }
   }
 
-  // Into the input when its session is showing again, else into that session's saved draft; after what was typed since.
+  // Onto the end of what the input showing that session holds (any instance, not just this one); else into its saved draft.
+  const receive = (failed: PromptSnapshot) => restore(appendSnapshot(snapshot(), failed))
   function recover(id: string | undefined, failed: PromptSnapshot) {
-    if (!disposed && owned?.id === id) return restore(appendSnapshot(snapshot(), failed))
+    const show = showingSession(id)
+    if (show) return show(failed)
     const merged = appendSnapshot(takeDraft(id) ?? { text: "", pasted: [], images: [] }, failed)
     saveDraft(id, { ...merged, cursor: offsetWidth(merged.text) })
   }
@@ -271,7 +273,9 @@ export function Prompt(props: PromptProps) {
   // sent isn't a draft, so the home prompt that unmounts when its first message opens a session doesn't leave a copy;
   // edits made since the send began are.
   function leave() {
-    if (!owned || renderer.isDestroyed) return
+    if (!owned) return
+    hideSession(owned.id, receive)
+    if (renderer.isDestroyed) return
     const draft = snapshot()
     if (sending && draft.text === sending.text && draft.images === sending.images) return
     saveDraft(owned.id, { ...draft, cursor: offsetWidth(prefix()) })
@@ -279,6 +283,7 @@ export function Prompt(props: PromptProps) {
   createEffect(on(() => props.sessionId, (id) => {
     leave()
     owned = { id }
+    showSession(id, receive)
     const draft = takeDraft(id)
     restore(draft ?? { text: "", pasted: [], images: [] }, draft?.cursor)
   }))
