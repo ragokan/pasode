@@ -128,7 +128,7 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
     if (terminalFocused()) notify(message, ({ finished: "success", error: "error", permission: "warning" } as const)[event.reason], title)
     else renderer.triggerNotification(message, title)
   }
-  const waiting = new Set<ReturnType<typeof setTimeout>>() // fallback alerts still in their ACK_MS wait
+  const waiting = new Map<string, ReturnType<typeof setTimeout>>() // fallback alerts still in their ACK_MS wait, by session and reason
   const events = daemon.observeEvents(["agent_attention_required"], { notifications: true })
   events.ready.catch(() => {})
   const off = daemon.onAgentAttentionRequired((event) => {
@@ -136,17 +136,19 @@ export function installUx(renderer: CliRenderer, terminalFocused: () => boolean)
     const route = routeAttention({ shouldNotify: event.shouldNotify, present: presence.present(), watched: watched.has(event.agentId) })
     if (route === "now") show(event)
     else if (route === "unacknowledged") {
+      // A client with the session open gets each event twice (the provider's copy is never routed: shouldNotify false).
+      const key = `${event.agentId}:${event.reason}`
+      if (waiting.has(key)) return
       // Everything is rechecked when it fires: the pref, warp, focus and the flag can all change during the wait.
-      const timer = setTimeout(() => {
-        waiting.delete(timer)
+      waiting.set(key, setTimeout(() => {
+        waiting.delete(key)
         if (prefs.notifications && !warpOwns() && !terminalFocused() && agents[event.agentId]?.requiresAttention) show(event)
-      }, ACK_MS)
-      waiting.add(timer)
+      }, ACK_MS))
     }
   })
   onCleanup(() => {
     off()
-    waiting.forEach(clearTimeout)
+    waiting.forEach((timer) => clearTimeout(timer))
     void events.release().catch(() => {})
   })
 

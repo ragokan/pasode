@@ -1,7 +1,9 @@
 // Provenance: ~/coding/ocode/plugins/warp/tests/{v2,payload,title,notify}.test.ts semantics; Paseo fixtures authored for pasode.
 import { expect, test } from "bun:test"
 import path from "node:path"
+import { ACK_MS as hostAck, PRESENT_MS as hostPresent, routeAttention as hostRoute } from "../../src/presence"
 import { formatTitle, negotiateProtocolVersion, richSequence } from "./payload"
+import { ACK_MS, PRESENT_MS, routeAttention } from "./routing"
 import { createTransitions, type AgentState } from "./transitions"
 
 const agent = (id: string, options: Partial<AgentState> = {}): AgentState => ({
@@ -129,7 +131,7 @@ test("a delayed stop never carries another session's transcript; off-screen sess
   expect(result.exitCode).toBe(0)
 }, 15_000)
 
-test("in Kaku: an animated spinner while running, one notification per event for the session on screen", () => {
+test("in Kaku: an animated spinner while running, a notification for each attention event the daemon routes here", () => {
   const host = path.resolve(import.meta.dir, "../..")
   const result = Bun.spawnSync({
     cmd: [process.execPath, "-e", `
@@ -150,6 +152,7 @@ test("in Kaku: an animated spinner while running, one notification per event for
       const listeners = {}
       const observed = []
       let released = false
+      let attend
       const dispose = createRoot((dispose) => (plugin.setup({
         options: {},
         renderer: {
@@ -157,15 +160,19 @@ test("in Kaku: an animated spinner while running, one notification per event for
           on: (name, fn) => { listeners[name] = fn }, off: (name, fn) => { if (listeners[name] === fn) delete listeners[name] },
           keyInput: { on() {}, off() {} },
         },
+        state: { prefs: { notifications: true } },
+        ui: { toast: () => { throw new Error("a blurred terminal gets a desktop notification, not a toast") } },
         paseo: {
           current: () => agents().a, agentId: () => "a", sessionTitle: (agent) => agent.title,
           get agents() { return agents() }, get timeline() { return { agentId: "a", rows: [{ type: "assistant_message", text: "All done.\\n\\nSee diff" }] } },
           daemon: {
             sendHeartbeat: (beat) => beats.push(beat),
             observeEvents: (...args) => { observed.push(args); return { ready: Promise.resolve(), release: async () => { released = true } } },
+            onAgentAttentionRequired: (fn) => { attend = fn; return () => { attend = undefined } },
           },
         },
       }), dispose))
+      const attention = (agentId, reason, shouldNotify = true) => attend({ agentId, reason, shouldNotify, timestamp: "t", notification: { title: "", body: "the daemon's preview", data: {} } })
       // Paseo picks one present client to notify; this one reports its session and focus.
       assert.deepEqual(observed, [[["agent_attention_required"], { notifications: true }]])
       assert.deepEqual([beats[0].deviceType, beats[0].focusedAgentId, beats[0].appVisible], ["web", "a", true])
@@ -177,11 +184,18 @@ test("in Kaku: an animated spinner while running, one notification per event for
       spinner[0].fn()
       assert.equal(titles.at(-1), "⠰ a")
       setAgents({ ...agents(), a: agent("a", "running", { pendingPermissions: [{ name: "Edit", input: {} }] }) })
+      assert.deepEqual(notes, []) // the store changing is not an alert; the daemon's routed event is
+      attention("a", "permission")
       setAgents({ ...agents(), a: agent("a", "running") })
       const finished = { requiresAttention: true, attentionReason: "finished", attentionTimestamp: "t1" }
       setAgents({ ...agents(), a: agent("a", "idle", finished) })
       setAgents({ ...agents(), b: agent("b", "idle", finished) })
+      attention("a", "finished")
+      attention("b", "finished", false) // counted, but the daemon picked another client
       assert.deepEqual(notes, [["🟡 a", "Needs your input"], ["✓ a", "All done. See diff"]])
+      attention("b", "error") // picked for a session that isn't open: the daemon's preview stands in for the transcript
+      assert.deepEqual(notes.at(-1), ["🔴 b", "the daemon's preview"])
+      notes.pop()
       assert.equal(titles.at(-1), "✓ a")
       // The host acknowledges the finish on screen; the ✓ stays until the session runs again.
       setAgents({ ...agents(), a: agent("a", "idle") })
@@ -192,6 +206,7 @@ test("in Kaku: an animated spinner while running, one notification per event for
       assert.notEqual(titles.at(-1), "✓ a")
       dispose()
       assert.equal(released, true)
+      assert.equal(attend, undefined)
       assert.deepEqual(Object.keys(listeners), [])
       assert.equal(intervals.filter((timer) => timer.live).length, 0)
     `],
@@ -235,7 +250,7 @@ test("in Kaku: heartbeats report real input and focus as activity, never the bea
         paseo: {
           current: () => undefined, agentId: shown, sessionTitle: () => "",
           agents: {}, timeline: { agentId: "a", rows: [] },
-          daemon: { sendHeartbeat: (beat) => beats.push(beat), observeEvents: () => ({ ready: Promise.resolve(), release: async () => {} }) },
+          daemon: { sendHeartbeat: (beat) => beats.push(beat), observeEvents: () => ({ ready: Promise.resolve(), release: async () => {} }), onAgentAttentionRequired: () => () => {} },
         },
       }), dispose))
       const beat = () => intervals.find((timer) => timer.live && timer.ms === 30000).fn()
@@ -272,6 +287,136 @@ test("in Kaku: heartbeats report real input and focus as activity, never the bea
   expect(result.stderr.toString()).toBe("")
   expect(result.exitCode).toBe(0)
 }, 15_000)
+
+test("in Kaku: alerts follow the host's policy: picked alerts, counted-but-not-picked stays quiet, idle falls back to unacknowledged sessions opened here", () => {
+  const host = path.resolve(import.meta.dir, "../..")
+  const result = Bun.spawnSync({
+    cmd: [process.execPath, "-e", `
+      const assert = (await import("node:assert/strict")).default
+      await import(Bun.resolveSync("@opentui/solid/preload", process.cwd()))
+      const { ensureRuntimePluginSupport } = await import(Bun.resolveSync("@opentui/solid/runtime-plugin-support/configure", process.cwd()))
+      ensureRuntimePluginSupport()
+      globalThis.setInterval = () => 0
+      globalThis.clearInterval = () => {}
+      const waiting = []
+      const cleared = []
+      const realSetTimeout = globalThis.setTimeout
+      const realClearTimeout = globalThis.clearTimeout
+      let ids = 0
+      globalThis.setTimeout = (fn, ms, ...rest) => ms === 3000 ? (fn.id = ++ids, waiting.push(fn), fn.id) : realSetTimeout(fn, ms, ...rest)
+      globalThis.clearTimeout = (id) => typeof id === "number" ? cleared.push(id) : realClearTimeout(id)
+      let now = Date.parse("2026-01-01T00:00:00Z")
+      Date.now = () => now
+      const { default: plugin } = await import(${JSON.stringify(path.join(import.meta.dir, "tui.tsx"))})
+      const { createRoot, createSignal } = await import("opentui:runtime-module:solid-js")
+      const agent = (id) => ({ id, cwd: "/p", title: id, status: "idle", pendingPermissions: [], requiresAttention: false })
+      const agents = { a: agent("a"), z: agent("z") }
+      const [shown, setShown] = createSignal("a")
+      const prefs = { notifications: true }
+      const notes = []
+      const toasts = []
+      const listeners = {}
+      const keys = new Set()
+      let attend
+      const dispose = createRoot((dispose) => (plugin.setup({
+        options: {},
+        renderer: {
+          setTerminalTitle: () => {}, triggerNotification: (message, title) => notes.push([title, message]),
+          on: (name, fn) => { listeners[name] = fn }, off: () => {},
+          keyInput: { on: (name, fn) => keys.add(fn), off: (name, fn) => keys.delete(fn) },
+        },
+        state: { prefs },
+        ui: { toast: (message, variant, title) => toasts.push([title, message, variant]) },
+        paseo: {
+          current: () => agents[shown()], agentId: shown, sessionTitle: (agent) => agent.title,
+          agents, timeline: { agentId: "a", rows: [{ type: "assistant_message", text: "All done." }] },
+          daemon: {
+            sendHeartbeat: () => {}, observeEvents: () => ({ ready: Promise.resolve(), release: async () => {} }),
+            onAgentAttentionRequired: (fn) => { attend = fn; return () => { attend = undefined } },
+          },
+        },
+      }), dispose))
+      const attention = (agentId, reason, shouldNotify) => attend({ agentId, reason, shouldNotify, timestamp: "t", notification: { title: "", body: "preview", data: {} } })
+      const idle = () => { now += 151_000 }
+
+      // Counted (just launched). Picked: alert, as a toast in front and a desktop notification in the background.
+      attention("a", "finished", true)
+      assert.deepEqual([notes, toasts], [[], [["✓ a", "All done.", "success"]]])
+      listeners.blur()
+      attention("a", "finished", true)
+      attention("z", "permission", true) // any session: the daemon picked this client, so nobody else will say it
+      assert.deepEqual(notes, [["✓ a", "All done."], ["🟡 z", "Needs your input"]])
+      notes.length = 0
+      // Counted but not picked: another client has it, or someone is watching.
+      attention("a", "finished", false)
+      assert.deepEqual([notes, waiting.length], [[], 0])
+      // The pref silences picked alerts too.
+      prefs.notifications = false
+      attention("a", "finished", true)
+      assert.deepEqual(notes, [])
+      prefs.notifications = true
+
+      // Idle past the window the daemon never counted this client: sessions opened here that nobody acknowledges alert.
+      idle()
+      attention("z", "finished", false) // never opened here
+      assert.equal(waiting.length, 0)
+      attention("a", "finished", false)
+      assert.deepEqual([notes, waiting.length], [[], 1]) // not at once: a client viewing it acknowledges first
+      agents.a.requiresAttention = false
+      waiting.pop()()
+      assert.deepEqual(notes, []) // acknowledged elsewhere
+      agents.a.requiresAttention = true
+      attention("a", "finished", false)
+      waiting.pop()()
+      assert.deepEqual(notes, [["✓ a", "All done."]]) // nobody did
+      notes.length = 0
+      attention("a", "finished", false)
+      prefs.notifications = false // turned off during the wait
+      waiting.pop()()
+      assert.deepEqual(notes, [])
+      prefs.notifications = true
+      attention("a", "finished", false)
+      listeners.focus() // looking at it by then
+      waiting.pop()()
+      assert.deepEqual([notes, toasts.length], [[], 1])
+      listeners.blur()
+      // The daemon sends each event twice to a client with the session open (one copy never routed, shouldNotify false):
+      // one wait for the pair, and one alert.
+      idle() // coming back to the window counted as activity
+      attention("a", "finished", false)
+      attention("a", "finished", false)
+      assert.equal(waiting.length, 1)
+      waiting.pop()()
+      assert.deepEqual(notes, [["✓ a", "All done."]])
+      notes.length = 0
+
+      for (const fn of keys) fn({ name: "a" }) // typing counts the client again, and the daemon's answer is final
+      attention("a", "finished", false)
+      assert.equal(waiting.length, 0)
+
+      idle()
+      attention("a", "finished", false)
+      assert.equal(waiting.length, 1)
+      const pending = waiting.at(-1).id
+      dispose() // a pending alert must not outlive the plugin
+      assert.equal(attend, undefined)
+      assert.equal(cleared.includes(pending), true)
+    `],
+    cwd: host,
+    env: { ...process.env, TERM_PROGRAM: "Kaku", WARP_CLI_AGENT_PROTOCOL_VERSION: "" },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  expect(result.stderr.toString()).toBe("")
+  expect(result.exitCode).toBe(0)
+}, 15_000)
+
+test("the plugin's alert policy is the host's: same window, same wait, same routing (a plugin can't import the host at runtime)", () => {
+  expect([ACK_MS, PRESENT_MS]).toEqual([hostAck, hostPresent])
+  for (const shouldNotify of [true, false]) for (const present of [true, false]) for (const watched of [true, false]) {
+    expect(routeAttention({ shouldNotify, present, watched })).toBe(hostRoute({ shouldNotify, present, watched }))
+  }
+})
 
 test("titles remove controls and keep ocode's label limits: 40, or 27 in Warp", () => {
   expect(formatTitle("hello\x1b\x07\x9cworld", "• ")).toBe("• hello   world")

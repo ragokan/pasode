@@ -6,7 +6,7 @@ export const HEARTBEAT_MS = 15_000
 /** How long after an unacknowledged attention event a client that wasn't routed it still alerts. */
 export const ACK_MS = 3_000
 /** The daemon counts a client present for 180 s after its last activity; shave a margin so skew or a late beat can't make us think we are when it doesn't. */
-const PRESENT_MS = 150_000
+export const PRESENT_MS = 150_000
 
 type Beat = Parameters<typeof daemon.sendHeartbeat>[0]
 
