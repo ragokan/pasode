@@ -19,6 +19,11 @@ for (const target of targets.length ? targets : [`bun-${process.platform}-${proc
     console.error(result.logs.join("\n"))
     process.exit(1)
   }
+  // Bun ad-hoc signs darwin-arm64 but leaves darwin-x64 with its own runtime's, now invalid, signature; on a Mac
+  // (where the release workflow builds them) sign both ad hoc. A cross-build elsewhere keeps the invalid one.
+  if (target.startsWith("bun-darwin") && process.platform === "darwin") {
+    if (!Bun.spawnSync(["codesign", "--force", "--sign", "-", outfile], { stderr: "inherit" }).success) process.exit(1)
+  }
   const archive = Bun.gzipSync(await Bun.file(outfile).bytes(), { level: 9 })
   await Bun.write(`${outfile}.gz`, archive)
   sums.push(`${new Bun.CryptoHasher("sha256").update(archive).digest("hex")}  ${path.basename(outfile)}.gz`)
